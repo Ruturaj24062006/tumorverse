@@ -10,9 +10,11 @@ interface TumorModelProps {
   medicineEffect: "none" | "effective" | "ineffective"
   showGenes: boolean
   time: number
+  recoveryProgress: number
+  tumorIntensity: number
 }
 
-export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: TumorModelProps) {
+export function TumorModel({ aggressiveness, medicineEffect, showGenes, time, recoveryProgress, tumorIntensity }: TumorModelProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const particlesRef = useRef<THREE.Points>(null)
 
@@ -21,7 +23,7 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: 
     aggressiveness === "high" ? "#FF3B5C" : aggressiveness === "moderate" ? "#FF9F43" : "#00FF9C"
   const baseDistort = aggressiveness === "high" ? 0.6 : aggressiveness === "moderate" ? 0.4 : 0.2
   const baseSpeed = aggressiveness === "high" ? 2 : aggressiveness === "moderate" ? 1 : 0.5
-  const baseScale = aggressiveness === "high" ? 1.2 : aggressiveness === "moderate" ? 1.0 : 0.8
+  const baseScale = (aggressiveness === "high" ? 1.2 : aggressiveness === "moderate" ? 1.0 : 0.8) * (0.9 + tumorIntensity * 0.25)
 
   // Growth rate based on aggressiveness (growth per second)
   const growthRate = aggressiveness === "high" ? 0.15 : aggressiveness === "moderate" ? 0.08 : 0.04
@@ -35,33 +37,49 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: 
   const naturalDistort = baseDistort * evolutionFactor
   const naturalSpeed = baseSpeed * evolutionFactor
 
+  const recoveryRatio = Math.max(0, Math.min(1, recoveryProgress / 100))
+  const ineffectiveBoost = medicineEffect === "ineffective" ? Math.min(0.8, time * 0.03) : 0
+
   // Modified properties based on medicine effect
-  const currentColor =
-    medicineEffect === "effective"
-      ? "#00FF9C"
-      : medicineEffect === "ineffective"
-      ? "#FF0000"
-      : baseColor
+  const currentColor = (() => {
+    if (medicineEffect === "ineffective") {
+      return "#FF3B5C"
+    }
+
+    if (medicineEffect === "effective") {
+      const start = new THREE.Color(baseColor)
+      const mid = new THREE.Color("#FF9F43")
+      const end = new THREE.Color("#00FF9C")
+
+      if (recoveryRatio < 0.5) {
+        return start.lerp(mid, recoveryRatio * 2).getStyle()
+      }
+
+      return mid.lerp(end, (recoveryRatio - 0.5) * 2).getStyle()
+    }
+
+    return baseColor
+  })()
 
   const currentScale =
     medicineEffect === "effective"
-      ? naturalScale * 0.7 // Shrinking with treatment
+      ? naturalScale * (1 - 0.25 * recoveryRatio) // Slight shrink with treatment progress
       : medicineEffect === "ineffective"
-      ? naturalScale * 1.3 // Accelerated growth with wrong treatment
+      ? naturalScale * (1.15 + ineffectiveBoost) // Accelerated growth with wrong treatment
       : naturalScale // Natural growth without treatment
 
   const currentDistort =
     medicineEffect === "effective"
-      ? naturalDistort * 0.5 // Reduce distortion with effective treatment
+      ? naturalDistort * (1 - 0.6 * recoveryRatio) // Smoother surface during recovery
       : medicineEffect === "ineffective"
-      ? naturalDistort * 1.5 // Increase distortion with wrong treatment
+      ? naturalDistort * (1.35 + ineffectiveBoost * 0.5) // Increase distortion with wrong treatment
       : naturalDistort // Natural evolution
 
   const currentSpeed =
     medicineEffect === "effective"
-      ? naturalSpeed * 0.5 // Slow down with effective treatment
+      ? naturalSpeed * (1 - 0.45 * recoveryRatio) // Slow down with effective treatment
       : medicineEffect === "ineffective"
-      ? naturalSpeed * 1.5 // Speed up with wrong treatment
+      ? naturalSpeed * (1.4 + ineffectiveBoost * 0.4) // Speed up with wrong treatment
       : naturalSpeed // Natural evolution
 
   // Animation loop
@@ -81,7 +99,7 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: 
 
   // Generate gene particles
   const particlePositions = useMemo(() => {
-    const count = 200
+    const count = 80
     const positions = new Float32Array(count * 3)
     const radius = currentScale * 1.5
 
@@ -98,13 +116,13 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: 
         positions[i * 3 + 2] = r * Math.cos(phi);
     }
     return positions
-  }, [currentScale]) // Re-generate if base scale changes significantly
+  }, [currentScale, tumorIntensity])
 
 
   return (
     <group>
       {/* Main Tumor Body */}
-      <Sphere ref={meshRef} args={[1, 64, 64]}>
+      <Sphere ref={meshRef} args={[1, 32, 32]}>
         <MeshDistortMaterial
           color={currentColor}
           envMapIntensity={1}
@@ -125,7 +143,7 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: 
           <PointMaterial
             transparent
             color="#00E5FF"
-            size={0.05}
+            size={medicineEffect === "ineffective" ? 0.07 : 0.05}
             sizeAttenuation={true}
             depthWrite={false}
             blending={THREE.AdditiveBlending}
@@ -134,7 +152,7 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: 
       )}
 
        {/* Core glow */}
-       <Sphere args={[currentScale * 0.8, 32, 32]}>
+       <Sphere args={[currentScale * 0.8, 16, 16]}>
         <meshBasicMaterial color={currentColor} transparent opacity={0.15} blending={THREE.AdditiveBlending} />
       </Sphere>
     </group>

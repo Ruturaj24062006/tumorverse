@@ -305,6 +305,7 @@ export default function PredictionPage() {
                     cancer: result.cancer_type,
                     aggr: result.aggressiveness,
                     conf: result.confidence.toString(),
+                    imageName: imageFile?.name || "",
                     genes: JSON.stringify(result.top_genes.slice(0, 3)),
                     medsRecommended: JSON.stringify(result.medicines.recommended),
                     medsNotRecommended: JSON.stringify(result.medicines.notRecommended)

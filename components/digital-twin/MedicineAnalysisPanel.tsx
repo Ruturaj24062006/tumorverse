@@ -4,7 +4,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Pill, Activity, CheckCircle2, XCircle, Loader2 } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Pill, Activity, CheckCircle2, XCircle } from "lucide-react"
 
 interface Medicine {
     name: string
@@ -17,28 +18,25 @@ interface MedicineAnalysisPanelProps {
     cancerType: string
     recommended: Medicine[]
     notRecommended: Medicine[]
-    onSimulateDrug: (medicine: string) => Promise<void>
-    activeSimulation: string | null
+    selectedMedicine: string
+    onMedicineChange: (medicine: string) => void
+    onTestMedicine: () => void
+    isTesting: boolean
 }
 
 export function MedicineAnalysisPanel({
     cancerType,
     recommended,
     notRecommended,
-    onSimulateDrug,
-    activeSimulation,
+    selectedMedicine,
+    onMedicineChange,
+    onTestMedicine,
+    isTesting,
 }: MedicineAnalysisPanelProps) {
-    const [simulatingDrug, setSimulatingDrug] = useState<string | null>(null)
-
-    const handleSimulate = async (medicineName: string) => {
-        setSimulatingDrug(medicineName)
-        await onSimulateDrug(medicineName)
-        setSimulatingDrug(null)
-    }
+    const [customMedicine, setCustomMedicine] = useState("")
 
     const renderMedicineCard = (m: Medicine, isRecommended: boolean) => {
-        const isSimulating = simulatingDrug === m.name
-        const isActive = activeSimulation === m.name
+        const isActive = selectedMedicine.toLowerCase() === m.name.toLowerCase()
         const themeColor = isRecommended ? "#00FF9C" : "#FF3B5C"
         const bgOpacity = isActive ? "0.15" : "0.05"
 
@@ -76,30 +74,25 @@ export function MedicineAnalysisPanel({
                 </div>
 
                 <p className="mb-4 text-xs leading-relaxed" style={{ color: "#8899AA" }}>
-                    <span className="font-semibold text-[#E8EDF2]/70">Mechanism: </span>
+                    <span className="font-semibold text-[#E8EDF2]/70">{isRecommended ? "Why recommended: " : "Why not recommended: "}</span>
                     {m.mechanism || m.reason}
                 </p>
 
                 <Button
-                    onClick={() => handleSimulate(m.name)}
-                    disabled={isSimulating || isActive}
+                    onClick={() => onMedicineChange(m.name)}
                     className={`w-full text-xs font-semibold shadow-none transition-colors ${isActive
                             ? "bg-[#00E5FF]/20 text-[#00E5FF] hover:bg-[#00E5FF]/30 cursor-default"
                             : "bg-[#0A1628] text-[#E8EDF2] hover:bg-[#1A2638]"
                         }`}
                     style={!isActive ? { border: `1px solid ${themeColor}40` } : {}}
                 >
-                    {isSimulating ? (
+                    {isActive ? (
                         <span className="flex items-center gap-2">
-                            <Loader2 className="h-3 w-3 animate-spin" /> Simulating...
-                        </span>
-                    ) : isActive ? (
-                        <span className="flex items-center gap-2">
-                            <Activity className="h-3 w-3" /> Currently Simulating
+                            <Activity className="h-3 w-3" /> Selected for Test
                         </span>
                     ) : (
                         <span className="flex items-center gap-2">
-                            <Activity className="h-3 w-3" /> Simulate Effect
+                            <Activity className="h-3 w-3" /> Select Medicine
                         </span>
                     )}
                 </Button>
@@ -116,6 +109,36 @@ export function MedicineAnalysisPanel({
                 <p className="mt-1 text-sm" style={{ color: "#8899AA" }}>
                     Evaluate compatibility for <span className="text-[#00E5FF]">{cancerType}</span>
                 </p>
+
+                <div className="mt-4 space-y-2">
+                    <p className="text-xs uppercase tracking-wider text-[#8899AA]">Test Medicine</p>
+                    <div className="flex items-center gap-2">
+                        <Input
+                            value={customMedicine}
+                            onChange={(e) => setCustomMedicine(e.target.value)}
+                            placeholder="Enter medicine name"
+                            className="border-white/10 bg-[#0A1628]/70 text-[#E8EDF2] placeholder:text-[#8899AA]"
+                        />
+                        <Button
+                            variant="outline"
+                            className="border-[#8A2BE2]/40 text-[#8A2BE2] hover:bg-[#8A2BE2]/10 hover:text-[#8A2BE2]"
+                            onClick={() => {
+                                if (customMedicine.trim()) {
+                                    onMedicineChange(customMedicine.trim())
+                                }
+                            }}
+                        >
+                            Use
+                        </Button>
+                    </div>
+                    <Button
+                        onClick={onTestMedicine}
+                        disabled={!selectedMedicine || isTesting}
+                        className="w-full bg-[#00E5FF] text-[#0A1628] hover:bg-[#00E5FF]/90"
+                    >
+                        {isTesting ? "Testing Medicine..." : "Test Medicine on Digital Twin"}
+                    </Button>
+                </div>
             </div>
 
             <ScrollArea className="flex-1 pr-4">

@@ -171,12 +171,26 @@ export async function POST(request: NextRequest) {
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData()
-      const file = formData.get("file")
-      if (!file || !(file instanceof File)) {
-        return NextResponse.json({ error: "No file provided" }, { status: 400 })
+      const geneFile = formData.get("file")
+      const imageFile = formData.get("image")
+
+      if (!(geneFile instanceof File) && !(imageFile instanceof File)) {
+        return NextResponse.json({ error: "No file or image provided" }, { status: 400 })
       }
-      const text = await file.text()
-      const result = generatePrediction(text)
+
+      let seedPayload = ""
+
+      if (geneFile instanceof File) {
+        const text = await geneFile.text()
+        seedPayload += text
+      }
+
+      if (imageFile instanceof File) {
+        const imageBuffer = await imageFile.arrayBuffer()
+        seedPayload += `${imageFile.name}:${imageFile.type}:${imageBuffer.byteLength}`
+      }
+
+      const result = generatePrediction(seedPayload)
       return NextResponse.json(result)
     }
 
