@@ -293,12 +293,12 @@ export default function PredictionPage() {
             {/* Actions for next step */}
             <div className="flex flex-col items-center justify-center gap-4 py-8">
               <div className="flex items-center gap-2">
-                <div className="h-[1px] w-12 bg-gradient-to-r from-transparent to-[#8A2BE2]/50"></div>
+                <div className="h-px w-12 bg-linear-to-r from-transparent to-[#8A2BE2]/50"></div>
                 <span className="text-xs uppercase tracking-widest text-[#8A2BE2] font-semibold">Next Step</span>
-                <div className="h-[1px] w-12 bg-gradient-to-l from-transparent to-[#8A2BE2]/50"></div>
+                <div className="h-px w-12 bg-linear-to-l from-transparent to-[#8A2BE2]/50"></div>
               </div>
 
-              <Button asChild className="h-14 rounded-2xl bg-gradient-to-r from-[#00E5FF] to-[#8A2BE2] px-8 text-white hover:opacity-90 font-bold shadow-[0_0_20px_rgba(138,43,226,0.3)] transition-all hover:scale-105">
+              <Button asChild className="h-14 rounded-2xl bg-linear-to-r from-[#00E5FF] to-[#8A2BE2] px-8 text-white hover:opacity-90 font-bold shadow-[0_0_20px_rgba(138,43,226,0.3)] transition-all hover:scale-105">
                 <Link href={{
                   pathname: "/tumor-twin",
                   query: {
