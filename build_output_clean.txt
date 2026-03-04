@@ -1,0 +1,156 @@
+
+> tumorverse@0.1.0 build
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+
+  Creating an optimized production build ...
+
+> Build error occurred
+Error: Turbopack build failed with 5 errors:
+./components/digital-twin/Scene.tsx:5:1
+Module not found: Can't resolve '@react-three/drei'
+[0m [90m 3 |[39m [36mimport[39m { [33mSuspense[39m } [36mfrom[39m [32m"react"[39m
+ [90m 4 |[39m [36mimport[39m { [33mCanvas[39m } [36mfrom[39m [32m"@react-three/fiber"[39m
+[31m[1m>[22m[39m[90m 5 |[39m [36mimport[39m { [33mOrbitControls[39m[33m,[39m [33mEnvironment[39m[33m,[39m [33mPerspectiveCamera[39m } [36mfrom[39m [32m"@react-three/drei"[39m
+ [90m   |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 6 |[39m [36mimport[39m { [33mTumorModel[39m } [36mfrom[39m [32m"./TumorModel"[39m
+ [90m 7 |[39m [36mimport[39m { [33mLoader2[39m } [36mfrom[39m [32m"lucide-react"[39m
+ [90m 8 |[39m[0m
+
+
+
+Import traces:
+  Client Component Browser:
+    ./components/digital-twin/Scene.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/digital-twin/Scene.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./components/digital-twin/TumorModel.tsx:5:1
+Module not found: Can't resolve '@react-three/drei'
+[0m [90m 3 |[39m [36mimport[39m { useRef[33m,[39m useMemo } [36mfrom[39m [32m"react"[39m
+ [90m 4 |[39m [36mimport[39m { useFrame } [36mfrom[39m [32m"@react-three/fiber"[39m
+[31m[1m>[22m[39m[90m 5 |[39m [36mimport[39m { [33mSphere[39m[33m,[39m [33mMeshDistortMaterial[39m[33m,[39m [33mPoints[39m[33m,[39m [33mPointMaterial[39m } [36mfrom[39m [32m"@react-three/drei"[39m
+ [90m   |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 6 |[39m [36mimport[39m [33m*[39m [36mas[39m [33mTHREE[39m [36mfrom[39m [32m"three"[39m
+ [90m 7 |[39m
+ [90m 8 |[39m [36minterface[39m [33mTumorModelProps[39m {[0m
+
+
+
+Import traces:
+  Client Component Browser:
+    ./components/digital-twin/TumorModel.tsx [Client Component Browser]
+    ./components/digital-twin/Scene.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/digital-twin/TumorModel.tsx [Client Component SSR]
+    ./components/digital-twin/Scene.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./components/digital-twin/Scene.tsx:4:1
+Module not found: Can't resolve '@react-three/fiber'
+[0m [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m { [33mSuspense[39m } [36mfrom[39m [32m"react"[39m
+[31m[1m>[22m[39m[90m 4 |[39m [36mimport[39m { [33mCanvas[39m } [36mfrom[39m [32m"@react-three/fiber"[39m
+ [90m   |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 5 |[39m [36mimport[39m { [33mOrbitControls[39m[33m,[39m [33mEnvironment[39m[33m,[39m [33mPerspectiveCamera[39m } [36mfrom[39m [32m"@react-three/drei"[39m
+ [90m 6 |[39m [36mimport[39m { [33mTumorModel[39m } [36mfrom[39m [32m"./TumorModel"[39m
+ [90m 7 |[39m [36mimport[39m { [33mLoader2[39m } [36mfrom[39m [32m"lucide-react"[39m[0m
+
+
+
+Import traces:
+  Client Component Browser:
+    ./components/digital-twin/Scene.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/digital-twin/Scene.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./components/digital-twin/TumorModel.tsx:4:1
+Module not found: Can't resolve '@react-three/fiber'
+[0m [90m 2 |[39m
+ [90m 3 |[39m [36mimport[39m { useRef[33m,[39m useMemo } [36mfrom[39m [32m"react"[39m
+[31m[1m>[22m[39m[90m 4 |[39m [36mimport[39m { useFrame } [36mfrom[39m [32m"@react-three/fiber"[39m
+ [90m   |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 5 |[39m [36mimport[39m { [33mSphere[39m[33m,[39m [33mMeshDistortMaterial[39m[33m,[39m [33mPoints[39m[33m,[39m [33mPointMaterial[39m } [36mfrom[39m [32m"@react-three/drei"[39m
+ [90m 6 |[39m [36mimport[39m [33m*[39m [36mas[39m [33mTHREE[39m [36mfrom[39m [32m"three"[39m
+ [90m 7 |[39m[0m
+
+
+
+Import traces:
+  Client Component Browser:
+    ./components/digital-twin/TumorModel.tsx [Client Component Browser]
+    ./components/digital-twin/Scene.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/digital-twin/TumorModel.tsx [Client Component SSR]
+    ./components/digital-twin/Scene.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+./components/digital-twin/TumorModel.tsx:6:1
+Module not found: Can't resolve 'three'
+[0m [90m 4 |[39m [36mimport[39m { useFrame } [36mfrom[39m [32m"@react-three/fiber"[39m
+ [90m 5 |[39m [36mimport[39m { [33mSphere[39m[33m,[39m [33mMeshDistortMaterial[39m[33m,[39m [33mPoints[39m[33m,[39m [33mPointMaterial[39m } [36mfrom[39m [32m"@react-three/drei"[39m
+[31m[1m>[22m[39m[90m 6 |[39m [36mimport[39m [33m*[39m [36mas[39m [33mTHREE[39m [36mfrom[39m [32m"three"[39m
+ [90m   |[39m [31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m[31m[1m^[22m[39m
+ [90m 7 |[39m
+ [90m 8 |[39m [36minterface[39m [33mTumorModelProps[39m {
+ [90m 9 |[39m   aggressiveness[33m:[39m [32m"low"[39m [33m|[39m [32m"moderate"[39m [33m|[39m [32m"high"[39m[0m
+
+
+
+Import traces:
+  Client Component Browser:
+    ./components/digital-twin/TumorModel.tsx [Client Component Browser]
+    ./components/digital-twin/Scene.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Client Component Browser]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+  Client Component SSR:
+    ./components/digital-twin/TumorModel.tsx [Client Component SSR]
+    ./components/digital-twin/Scene.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Client Component SSR]
+    ./app/tumor-twin/page.tsx [Server Component]
+
+https://nextjs.org/docs/messages/module-not-found
+
+
+    at <unknown> (./components/digital-twin/Scene.tsx:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./components/digital-twin/TumorModel.tsx:5:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./components/digital-twin/Scene.tsx:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./components/digital-twin/TumorModel.tsx:4:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
+    at <unknown> (./components/digital-twin/TumorModel.tsx:6:1)
+    at <unknown> (https://nextjs.org/docs/messages/module-not-found)
