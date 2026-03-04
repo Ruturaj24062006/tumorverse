@@ -83,6 +83,11 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
                         depth: true,
                         logarithmicDepthBuffer: false,
                     }}
+                    onCreated={({ gl }) => {
+                        gl.domElement.addEventListener("webglcontextlost", (event) => {
+                            event.preventDefault()
+                        })
+                    }}
                 >
                     <PerspectiveCamera makeDefault position={[0, 0, zoomLevel]} fov={45} />
                     <OrbitControls

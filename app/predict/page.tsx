@@ -20,6 +20,11 @@ import {
   X,
   Image as ImageIcon
 } from "lucide-react"
+import { AILoading } from "@/components/ui/ai-loading"
+import { ErrorPanel } from "@/components/ui/error-panel"
+import { ConfidenceVisualizer } from "@/components/ui/confidence-visualizer"
+import { GeneVisualizer } from "@/components/ui/gene-visualizer"
+import { motion } from "framer-motion"
 
 interface GeneImportance {
   gene: string
@@ -47,14 +52,24 @@ interface PredictionResult {
 }
 
 export default function PredictionPage() {
-  const [file, setFile] = useState<File | null>(null) // Gene expr
-  const [imageFile, setImageFile] = useState<File | null>(null) // Tumor Image
+  const [file, setFile] = useState<File | null>(null)
+  const [imageFile, setImageFile] = useState<File | null>(null)
   const [dragActive, setDragActive] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [loadingStep, setLoadingStep] = useState(0)
   const [result, setResult] = useState<PredictionResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [dismissedError, setDismissedError] = useState(false)
+  const [error, setError] = useState<{ title: string; message: string; type: string } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
+
+  const predictionSteps = [
+    "Uploading tumor data",
+    "Analyzing gene expression",
+    "Running AI model",
+    "Generating digital tumor twin",
+    "Preparing medicine recommendations"
+  ]
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -94,33 +109,68 @@ export default function PredictionPage() {
     setLoading(true)
     setError(null)
     setResult(null)
+  setDismissedError(false)
 
     try {
       let res: Response
       if (useDemo) {
+                const steps = [...predictionSteps]
+                for (let i = 0; i < steps.length; i++) {
+                  setLoadingStep(i)
+                  await new Promise(resolve => setTimeout(resolve, 800))
+                }
         res = await fetch("/api/predict", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ demo: true, genes: 20000, samples: 1 }),
         })
       } else if (file || imageFile) {
+                const totalSize = (file?.size || 0) + (imageFile?.size || 0)
+                if (totalSize > 100 * 1024 * 1024) {
+                  setError({
+                    title: "File Too Large",
+                    message: "Total file size exceeds 100MB. Please upload smaller files.",
+                    type: "file_too_large"
+                  })
+                  setLoading(false)
+                  return
+                }
+                const steps = [...predictionSteps]
+                for (let i = 0; i < steps.length; i++) {
+                  setLoadingStep(i)
+                  await new Promise(resolve => setTimeout(resolve, 800))
+                }
         const formData = new FormData()
         if (file) formData.append("file", file)
         if (imageFile) formData.append("image", imageFile)
-
-        // Let's pretend the API handles both now, though in mock it doesn't need to change much
         res = await fetch("/api/predict", { method: "POST", body: formData })
       } else {
-        setError("Please upload gene data or a tumor image, or use demo mode.")
+        setError({
+          title: "Missing Data",
+          message: "Please upload gene data or a tumor image, or use demo mode.",
+          type: "invalid_file"
+        })
         setLoading(false)
         return
       }
-
-      if (!res.ok) throw new Error("Prediction failed")
+      if (!res.ok) {
+        if (res.status === 503) {
+          throw { title: "Server Offline", message: "The AI model server is temporarily offline. Please try again later.", type: "server_offline" }
+        }
+        throw { title: "Prediction Failed", message: "An error occurred during prediction. Please try again.", type: "prediction_failed" }
+      }
       const data = await res.json()
       setResult(data)
-    } catch {
-      setError("Prediction failed. Please try again.")
+    } catch (err: any) {
+      if (err.type) {
+        setError(err)
+      } else {
+        setError({
+          title: "Prediction Failed",
+          message: "An unexpected error occurred. Please try again.",
+          type: "prediction_failed"
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -148,7 +198,12 @@ export default function PredictionPage() {
 
         {/* Upload Area */}
         {!result && (
-          <div className="mx-auto max-w-4xl">
+          <motion.div
+            className="mx-auto max-w-4xl"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
             <div className="grid gap-6 md:grid-cols-2">
               {/* Gene Data Upload */}
               <div
@@ -230,10 +285,18 @@ export default function PredictionPage() {
                 <Dna className="mr-1 h-4 w-4" /> Demo Mode
               </Button>
             </div>
+            {loading && (
+              <div className="mt-8 mx-auto max-w-md">
+                <AILoading currentStep={loadingStep} steps={predictionSteps} />
+              </div>
+            )}
 
-            {error && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-sm" style={{ color: "#FF3B5C" }}>
-                <AlertCircle className="h-4 w-4" /> {error}
+            {!loading && !dismissedError && error && (
+              <div className="mt-6">
+                <ErrorPanel 
+                  error={error as any} 
+                  onDismiss={() => setDismissedError(true)} 
+                />
               </div>
             )}
 
@@ -242,12 +305,17 @@ export default function PredictionPage() {
                 <p>Data readiness verified. Ready for analysis.</p>
               </div>
             )}
-          </div>
+          </motion.div>
         )}
 
         {/* Results */}
         {result && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <motion.div
+            className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45 }}
+          >
             {/* Top Summary */}
             <div className="glass-panel rounded-2xl p-6 neon-border relative overflow-hidden">
               {/* Decorative background for the result card */}
@@ -270,23 +338,8 @@ export default function PredictionPage() {
                 </div>
               </div>
 
-              {/* Confidence bar */}
               <div className="mt-6 relative z-10">
-                <div className="flex items-center justify-between text-sm">
-                  <span style={{ color: "#8899AA" }}>Prediction Confidence</span>
-                  <span className="font-mono font-bold" style={{ color: "#00E5FF" }}>
-                    {(result.confidence * 100).toFixed(1)}%
-                  </span>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full" style={{ backgroundColor: "rgba(0,229,255,0.1)" }}>
-                  <div
-                    className="h-full rounded-full transition-all duration-1000 ease-out"
-                    style={{
-                      width: `${result.confidence * 100}%`,
-                      background: "linear-gradient(90deg, #00E5FF, #8A2BE2)",
-                    }}
-                  />
-                </div>
+                <ConfidenceVisualizer confidence={result.confidence} label="Prediction Confidence" />
               </div>
             </div>
 
@@ -321,35 +374,29 @@ export default function PredictionPage() {
             </div>
 
 
-            {/* Simplified Gene Preview (moved down) */}
-            <div className="glass-panel rounded-2xl p-6 opacity-80">
-              <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">
-                <Dna className="h-4 w-4 text-[#8A2BE2]" /> Primary Influencing Genes
-              </h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {result.top_genes.slice(0, 4).map((g) => (
-                  <div key={g.gene} className="rounded-xl bg-[#0A1628]/50 p-3 border border-white/5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-medium text-[#E8EDF2]">{g.gene}</span>
-                      <span className="text-xs text-[#00E5FF] font-mono">{(g.importance * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            {/* Gene Visualization */}
+            <div>
+              <GeneVisualizer genes={result.top_genes} title="Gene Importance Analysis" />
             </div>
+
 
 
             <div className="flex justify-center pt-8 pb-4">
-              <Button
-                onClick={() => { setResult(null); setFile(null); setImageFile(null); }}
-                variant="ghost"
-                className="text-[#8899AA] hover:text-[#E8EDF2]"
-              >
-                Start Over
-              </Button>
+              <div className="flex flex-col items-center gap-3 sm:flex-row">
+                <Button asChild variant="outline" className="border-[#00E5FF]/30 text-[#00E5FF] hover:bg-[#00E5FF]/10">
+                  <Link href="/history">View Prediction History</Link>
+                </Button>
+                <Button
+                  onClick={() => { setResult(null); setFile(null); setImageFile(null); }}
+                  variant="ghost"
+                  className="text-[#8899AA] hover:text-[#E8EDF2]"
+                >
+                  Start Over
+                </Button>
+              </div>
             </div>
 
-          </div>
+          </motion.div>
         )}
       </main>
     </div>

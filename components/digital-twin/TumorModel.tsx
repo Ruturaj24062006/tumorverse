@@ -2,7 +2,7 @@
 
 import { useRef, useMemo } from "react"
 import { useFrame } from "@react-three/fiber"
-import { Sphere, MeshDistortMaterial, Points, PointMaterial } from "@react-three/drei"
+import { Sphere, MeshDistortMaterial } from "@react-three/drei"
 import * as THREE from "three"
 
 interface TumorModelProps {
@@ -16,7 +16,7 @@ interface TumorModelProps {
 
 export function TumorModel({ aggressiveness, medicineEffect, showGenes, time, recoveryProgress, tumorIntensity }: TumorModelProps) {
   const meshRef = useRef<THREE.Mesh>(null)
-  const particlesRef = useRef<THREE.Points>(null)
+  const particlesRef = useRef<THREE.InstancedMesh>(null)
 
   // Base properties based on aggressiveness
   const baseColor =
@@ -82,41 +82,52 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time, re
       ? naturalSpeed * (1.4 + ineffectiveBoost * 0.4) // Speed up with wrong treatment
       : naturalSpeed // Natural evolution
 
-  // Animation loop
+  const particleCount = useMemo(() => {
+    if (medicineEffect === "effective") return 80
+    if (medicineEffect === "ineffective") return 120
+    return 100
+  }, [medicineEffect])
+
+  const particleMatrices = useMemo(() => {
+    const matrices: THREE.Matrix4[] = []
+    const radius = currentScale * 1.5
+    const dummy = new THREE.Object3D()
+
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(Math.random() * 2 - 1)
+      const r = radius * (0.8 + Math.random() * 0.4)
+
+      const x = r * Math.sin(phi) * Math.cos(theta)
+      const y = r * Math.sin(phi) * Math.sin(theta)
+      const z = r * Math.cos(phi)
+
+      dummy.position.set(x, y, z)
+      dummy.scale.setScalar(medicineEffect === "ineffective" ? 1.15 : 1)
+      dummy.updateMatrix()
+      matrices.push(dummy.matrix.clone())
+    }
+
+    return matrices
+  }, [particleCount, currentScale, medicineEffect, tumorIntensity])
+
   useFrame((state) => {
     if (meshRef.current) {
       meshRef.current.rotation.x = state.clock.getElapsedTime() * 0.2 * currentSpeed
       meshRef.current.rotation.y = state.clock.getElapsedTime() * 0.3 * currentSpeed
-      
-      // Smooth scale transition
       meshRef.current.scale.lerp(new THREE.Vector3(currentScale, currentScale, currentScale), 0.05)
     }
 
     if (particlesRef.current && showGenes) {
       particlesRef.current.rotation.y = state.clock.getElapsedTime() * 0.1 * currentSpeed
+      particlesRef.current.rotation.x = state.clock.getElapsedTime() * 0.05 * currentSpeed
+
+      particleMatrices.forEach((matrix, index) => {
+        particlesRef.current?.setMatrixAt(index, matrix)
+      })
+      particlesRef.current.instanceMatrix.needsUpdate = true
     }
   })
-
-  // Generate gene particles
-  const particlePositions = useMemo(() => {
-    const count = 80
-    const positions = new Float32Array(count * 3)
-    const radius = currentScale * 1.5
-
-    for (let i = 0; i < count; i++) {
-        // Distribute points roughly uniformly on a sphere, then add some noise
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(Math.random() * 2 - 1);
-        
-        // Slightly random radius for floating effect
-        const r = radius * (0.8 + Math.random() * 0.4);
-
-        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-        positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-        positions[i * 3 + 2] = r * Math.cos(phi);
-    }
-    return positions
-  }, [currentScale, tumorIntensity])
 
 
   return (
@@ -137,18 +148,17 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time, re
         />
       </Sphere>
 
-      {/* Gene Markers (Glowing Nodes) */}
+      {/* Gene Markers (Instanced for GPU efficiency) */}
       {showGenes && (
-        <Points ref={particlesRef} positions={particlePositions}>
-          <PointMaterial
+        <instancedMesh ref={particlesRef} args={[undefined, undefined, particleCount]}>
+          <sphereGeometry args={[0.025, 8, 8]} />
+          <meshBasicMaterial
             transparent
-            color="#00E5FF"
-            size={medicineEffect === "ineffective" ? 0.07 : 0.05}
-            sizeAttenuation={true}
-            depthWrite={false}
+            color={medicineEffect === "ineffective" ? "#FF3B5C" : "#00E5FF"}
+            opacity={0.85}
             blending={THREE.AdditiveBlending}
           />
-        </Points>
+        </instancedMesh>
       )}
 
        {/* Core glow */}

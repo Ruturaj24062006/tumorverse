@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { Suspense, useState, useEffect } from "react"
 import { useSearchParams } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Badge } from "@/components/ui/badge"
@@ -18,7 +18,14 @@ import {
   TrendingDown,
   AlertTriangle,
   FlaskConical,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Dna,
 } from "lucide-react"
+import { motion } from "framer-motion"
+import { ConfidenceVisualizer } from "@/components/ui/confidence-visualizer"
+import { MedicineTimeline } from "@/components/ui/medicine-timeline"
 
 interface Medicine {
   name: string
@@ -35,7 +42,7 @@ interface SimulationResponse {
   risk_message?: string
 }
 
-export default function DigitalTwinPage() {
+function DigitalTwinContent() {
   const searchParams = useSearchParams()
 
   const [showGenes, setShowGenes] = useState(true)
@@ -49,6 +56,30 @@ export default function DigitalTwinPage() {
   const [resetSceneTrigger, setResetSceneTrigger] = useState(0)
   const [recoveryProgress, setRecoveryProgress] = useState(0)
   const [time, setTime] = useState(0)
+
+  useEffect(() => {
+    if (!simulationResult || medicineEffect === "none") return
+
+    const timelineTargets = medicineEffect === "effective" ? [25, 50, 75, 100] : [25, 50, 75, 100]
+    let currentIndex = 0
+
+    const interval = setInterval(() => {
+      if (currentIndex >= timelineTargets.length) {
+        clearInterval(interval)
+        return
+      }
+
+      const target = timelineTargets[currentIndex]
+      if (medicineEffect === "effective") {
+        setRecoveryProgress(target)
+      } else {
+        setRecoveryProgress(Math.min(target, 100))
+      }
+      currentIndex += 1
+    }, 1500)
+
+    return () => clearInterval(interval)
+  }, [simulationResult, medicineEffect])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -86,6 +117,7 @@ export default function DigitalTwinPage() {
     setActiveMedicine(selectedMedicine)
     setMedicineEffect("none")
     setSimulationResult(null)
+  setRecoveryProgress(0)
 
     try {
       const res = await fetch("/api/simulate-medicine", {
@@ -99,7 +131,22 @@ export default function DigitalTwinPage() {
         setSimulationResult(data)
         const effective = data.effective ?? data.effectiveness >= 0.65
         setMedicineEffect(effective ? "effective" : "ineffective")
-        setRecoveryProgress(effective ? 25 : 0)
+        setRecoveryProgress(0)
+
+        if (typeof window !== "undefined") {
+          const existing = JSON.parse(localStorage.getItem("predictionHistory") || "[]")
+          const historyItem = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            patientId: `P${String(Math.floor(Math.random() * 9000) + 1000)}`,
+            cancerType,
+            medicineTested: selectedMedicine,
+            result: effective ? "effective" : data.effectiveness >= 0.45 ? "moderate" : "ineffective",
+            effectiveness: data.effectiveness,
+            date: new Date().toISOString(),
+            confidence,
+          }
+          localStorage.setItem("predictionHistory", JSON.stringify([historyItem, ...existing].slice(0, 30)))
+        }
       }
     } catch (error) {
       console.error("Simulation failed:", error)
@@ -140,7 +187,12 @@ export default function DigitalTwinPage() {
       <Navbar />
 
       <main className="mx-auto flex-1 w-full max-w-7xl px-6 pb-12 pt-24">
-        <div className="mb-6 flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
+        <motion.div
+          className="mb-6 flex flex-col items-start justify-between gap-4 md:flex-row md:items-end"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
           <div>
             <Button asChild variant="ghost" size="sm" className="mb-2 -ml-3 text-[#8899AA] hover:text-[#E8EDF2]">
               <Link href="/predict">
@@ -172,10 +224,13 @@ export default function DigitalTwinPage() {
               </Badge>
               <Badge className="rounded-md border-0 bg-[#00E5FF]/10 px-2 py-0.5 text-xs font-semibold text-[#00E5FF]">
                 Prediction Conf. {(confidence * 100).toFixed(0)}%
+                          <div className="w-full max-w-xs">
+                            <ConfidenceVisualizer confidence={confidence} label="Confidence Level" />
+                          </div>
               </Badge>
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {medicineEffect !== "none" && (
           <div className="mb-6 rounded-2xl border border-white/10 glass-panel p-4">
@@ -233,7 +288,12 @@ export default function DigitalTwinPage() {
           </div>
         )}
 
-        <div className="grid h-[calc(100vh-150px)] min-h-150 gap-6 lg:grid-cols-5 xl:grid-cols-5">
+        <motion.div
+          className="grid min-h-160 gap-6 lg:h-[calc(100vh-150px)] lg:grid-cols-5 xl:grid-cols-5"
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.1 }}
+        >
           <div className="flex flex-col gap-4 lg:col-span-3 xl:col-span-3">
             <div className="glass-panel relative flex-1 overflow-hidden rounded-2xl neon-border">
               {activeMedicine && (
@@ -267,6 +327,58 @@ export default function DigitalTwinPage() {
                 recoveryProgress={recoveryProgress}
                 tumorIntensity={tumorIntensity}
               />
+
+              <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={() => setRotateEnabled((prev) => !prev)}
+                  className="h-9 w-9 rounded-full border-[#00E5FF]/30 bg-black/50 text-[#00E5FF] hover:bg-[#00E5FF]/15"
+                >
+                  <Activity className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={() => setZoomLevel((prev) => Math.max(3, prev - 0.8))}
+                  className="h-9 w-9 rounded-full border-[#00E5FF]/30 bg-black/50 text-[#00E5FF] hover:bg-[#00E5FF]/15"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={() => setZoomLevel((prev) => Math.min(10, prev + 0.8))}
+                  className="h-9 w-9 rounded-full border-[#00E5FF]/30 bg-black/50 text-[#00E5FF] hover:bg-[#00E5FF]/15"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={() => setShowGenes((prev) => !prev)}
+                  className="h-9 w-9 rounded-full border-[#00E5FF]/30 bg-black/50 text-[#00E5FF] hover:bg-[#00E5FF]/15"
+                >
+                  <Dna className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={handleSimulateDrug}
+                  disabled={!selectedMedicine.trim() || simulating}
+                  className="h-9 w-9 rounded-full border-[#8A2BE2]/30 bg-black/50 text-[#8A2BE2] hover:bg-[#8A2BE2]/15 disabled:opacity-50"
+                >
+                  <FlaskConical className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={handleResetView}
+                  className="h-9 w-9 rounded-full border-[#8899AA]/30 bg-black/50 text-[#8899AA] hover:bg-[#8899AA]/15"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              </div>
 
               <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2">
                 <div className="flex items-center gap-2 text-[10px] text-[#8899AA]">
@@ -308,6 +420,13 @@ export default function DigitalTwinPage() {
                       <Progress value={value} className="h-2" />
                     </div>
                   ))}
+                            {simulationResult && activeMedicine && medicineEffect !== "none" && (
+                              <MedicineTimeline
+                                timeline={recoveryTimeline}
+                                medicineEffect={medicineEffect as "effective" | "ineffective"}
+                                activeMedicine={activeMedicine}
+                              />
+                            )}
                 </div>
               </div>
             )}
@@ -356,8 +475,16 @@ export default function DigitalTwinPage() {
               </div>
             )}
           </div>
-        </div>
+        </motion.div>
       </main>
     </div>
+  )
+}
+
+export default function DigitalTwinPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" style={{ backgroundColor: "#0A1628" }} />}>
+      <DigitalTwinContent />
+    </Suspense>
   )
 }
