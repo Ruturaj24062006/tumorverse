@@ -9,9 +9,10 @@ interface TumorModelProps {
   aggressiveness: "low" | "moderate" | "high"
   medicineEffect: "none" | "effective" | "ineffective"
   showGenes: boolean
+  time: number
 }
 
-export function TumorModel({ aggressiveness, medicineEffect, showGenes }: TumorModelProps) {
+export function TumorModel({ aggressiveness, medicineEffect, showGenes, time }: TumorModelProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const particlesRef = useRef<THREE.Points>(null)
 
@@ -21,6 +22,18 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes }: TumorM
   const baseDistort = aggressiveness === "high" ? 0.6 : aggressiveness === "moderate" ? 0.4 : 0.2
   const baseSpeed = aggressiveness === "high" ? 2 : aggressiveness === "moderate" ? 1 : 0.5
   const baseScale = aggressiveness === "high" ? 1.2 : aggressiveness === "moderate" ? 1.0 : 0.8
+
+  // Growth rate based on aggressiveness (growth per second)
+  const growthRate = aggressiveness === "high" ? 0.15 : aggressiveness === "moderate" ? 0.08 : 0.04
+  
+  // Calculate natural growth over time
+  const growthFactor = 1 + (time * growthRate)
+  const naturalScale = baseScale * growthFactor
+
+  // Evolution factors: tumor becomes more distorted and faster as it grows
+  const evolutionFactor = 1 + (time * 0.02) // Gradual increase over time
+  const naturalDistort = baseDistort * evolutionFactor
+  const naturalSpeed = baseSpeed * evolutionFactor
 
   // Modified properties based on medicine effect
   const currentColor =
@@ -32,24 +45,24 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes }: TumorM
 
   const currentScale =
     medicineEffect === "effective"
-      ? baseScale * 0.7
+      ? naturalScale * 0.7 // Shrinking with treatment
       : medicineEffect === "ineffective"
-      ? baseScale * 1.3
-      : baseScale
+      ? naturalScale * 1.3 // Accelerated growth with wrong treatment
+      : naturalScale // Natural growth without treatment
 
   const currentDistort =
     medicineEffect === "effective"
-      ? baseDistort * 0.5
+      ? naturalDistort * 0.5 // Reduce distortion with effective treatment
       : medicineEffect === "ineffective"
-      ? baseDistort * 1.5
-      : baseDistort
+      ? naturalDistort * 1.5 // Increase distortion with wrong treatment
+      : naturalDistort // Natural evolution
 
   const currentSpeed =
     medicineEffect === "effective"
-      ? baseSpeed * 0.5
+      ? naturalSpeed * 0.5 // Slow down with effective treatment
       : medicineEffect === "ineffective"
-      ? baseSpeed * 1.5
-      : baseSpeed
+      ? naturalSpeed * 1.5 // Speed up with wrong treatment
+      : naturalSpeed // Natural evolution
 
   // Animation loop
   useFrame((state) => {

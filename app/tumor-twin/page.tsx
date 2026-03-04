@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
 import { Scene } from "@/components/digital-twin/Scene"
 import { ControlPanel } from "@/components/digital-twin/ControlPanel"
 import { MedicineAnalysisPanel } from "@/components/digital-twin/MedicineAnalysisPanel"
@@ -14,7 +15,9 @@ import {
     ArrowLeft,
     Dna,
     Database,
-    Info
+    Info,
+    TrendingUp,
+    TrendingDown
 } from "lucide-react"
 
 export default function DigitalTwinPage() {
@@ -25,6 +28,15 @@ export default function DigitalTwinPage() {
     const [activeMedicine, setActiveMedicine] = useState<string | null>(null)
     const [medicineEffect, setMedicineEffect] = useState<"none" | "effective" | "ineffective">("none")
     const [resetViewTrigger, setResetViewTrigger] = useState(0)
+    const [time, setTime] = useState(0)
+
+    // Auto-increment time (simulates progression)
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setTime((prev) => prev + 0.1)
+        }, 100)
+        return () => clearInterval(interval)
+    }, [])
 
     // Derived data
     const cancerType = searchParams.get("cancer") || "Unknown Cancer"
@@ -67,6 +79,7 @@ export default function DigitalTwinPage() {
         setResetViewTrigger(prev => prev + 1)
         setMedicineEffect("none")
         setActiveMedicine(null)
+        setTime(0)
     }
 
     const aggrColor = (a: string) => {
@@ -74,6 +87,25 @@ export default function DigitalTwinPage() {
         if (a === "moderate") return "#FF9F43"
         return "#00FF9C"
     }
+
+    // Recovery Calculation
+    const baseScale = aggressiveness === "high" ? 1.2 : aggressiveness === "moderate" ? 1.0 : 0.8
+    const growthRate = aggressiveness === "high" ? 0.15 : aggressiveness === "moderate" ? 0.08 : 0.04
+    const growthFactor = 1 + (time * growthRate)
+    const naturalScale = baseScale * growthFactor
+
+    const currentScale =
+        medicineEffect === "effective"
+            ? naturalScale * 0.7
+            : medicineEffect === "ineffective"
+            ? naturalScale * 1.3
+            : naturalScale
+
+    // Calculate volume (scale^3) and recovery percentage
+    const naturalVolume = Math.pow(naturalScale, 3)
+    const currentVolume = Math.pow(currentScale, 3)
+    const volumeReduction = ((naturalVolume - currentVolume) / naturalVolume) * 100
+    const recoveryPercentage = medicineEffect === "effective" ? Math.max(0, volumeReduction) : 0
 
     return (
         <div className="flex min-h-screen flex-col" style={{ backgroundColor: "#0A1628" }}>
@@ -112,11 +144,63 @@ export default function DigitalTwinPage() {
                     </div>
                 </div>
 
-                {/* Main Interface Grid */}
-                <div className="grid gap-6 lg:grid-cols-3 xl:grid-cols-4 h-[calc(100vh-220px)] min-h-[600px]">
+                {/* Recovery Monitor */}
+                {medicineEffect !== "none" && (
+                    <div className="glass-panel rounded-2xl p-4 mb-6 border border-white/10">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                                {medicineEffect === "effective" ? (
+                                    <TrendingUp className="h-5 w-5 text-[#00FF9C]" />
+                                ) : (
+                                    <TrendingDown className="h-5 w-5 text-[#FF3B5C]" />
+                                )}
+                                <h3 className="text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">
+                                    Health Status
+                                </h3>
+                            </div>
+                            <Badge
+                                className="border-0 text-xs"
+                                style={{
+                                    backgroundColor: medicineEffect === "effective" ? "rgba(0,255,156,0.2)" : "rgba(255,59,92,0.2)",
+                                    color: medicineEffect === "effective" ? "#00FF9C" : "#FF3B5C"
+                                }}
+                            >
+                                {medicineEffect === "effective" ? "Responding to Treatment" : "Ineffective Treatment"}
+                            </Badge>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <div className="flex-1">
+                                <div className="flex items-baseline justify-between mb-2">
+                                    <span className="text-xs text-[#8899AA]">Tumor Volume Reduction</span>
+                                    <span className="text-2xl font-bold" style={{ color: medicineEffect === "effective" ? "#00FF9C" : "#FF3B5C" }}>
+                                        {recoveryPercentage.toFixed(1)}%
+                                    </span>
+                                </div>
+                                <Progress
+                                    value={recoveryPercentage}
+                                    className="h-2"
+                                    style={{
+                                        backgroundColor: "rgba(255,255,255,0.1)"
+                                    }}
+                                />
+                                <style jsx global>{`
+                                    [data-slot="progress-indicator"] {
+                                        background: ${medicineEffect === "effective" ? "#00FF9C" : "#FF3B5C"} !important;
+                                    }
+                                `}</style>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs text-[#8899AA]">Elapsed Time</p>
+                                <p className="text-lg font-bold text-[#E8EDF2]">{time.toFixed(1)}s</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
+                {/* Main Interface Grid */}
+                <div className="grid gap-6 lg:grid-cols-5 xl:grid-cols-5 h-[calc(100vh-150px)] min-h-150">
                     {/* 3D Visualization Area (takes up more space) */}
-                    <div className="lg:col-span-2 xl:col-span-3 flex flex-col gap-4">
+                    <div className="lg:col-span-3 xl:col-span-3 flex flex-col gap-4">
                         {/* The Canvas Container */}
                         <div className="glass-panel relative flex-1 rounded-2xl overflow-hidden neon-border">
                             {/* Overlay Status (Active simulation info) */}
@@ -143,6 +227,7 @@ export default function DigitalTwinPage() {
                                 aggressiveness={aggressiveness}
                                 medicineEffect={medicineEffect}
                                 showGenes={showGenes}
+                                time={time}
                             />
 
                             {/* Legend Overlay */}
@@ -163,11 +248,13 @@ export default function DigitalTwinPage() {
                             showGenes={showGenes}
                             setShowGenes={setShowGenes}
                             onResetView={handleResetView}
+                            time={time}
+                            setTime={setTime}
                         />
                     </div>
 
                     {/* Sidebar Area */}
-                    <div className="lg:col-span-1 border-l border-white/5 pl-2 lg:pl-6 max-h-full">
+                    <div className="lg:col-span-2 xl:col-span-2 border-l border-white/5 pl-2 lg:pl-6 flex flex-col overflow-hidden">
                         <MedicineAnalysisPanel
                             cancerType={cancerType}
                             recommended={recommended.length ? recommended : [

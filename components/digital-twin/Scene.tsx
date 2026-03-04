@@ -10,9 +10,10 @@ interface SceneProps {
     aggressiveness: "low" | "moderate" | "high"
     medicineEffect: "none" | "effective" | "ineffective"
     showGenes: boolean
+    time: number
 }
 
-export function Scene({ aggressiveness, medicineEffect, showGenes }: SceneProps) {
+export function Scene({ aggressiveness, medicineEffect, showGenes, time }: SceneProps) {
     return (
         <div className="relative h-full w-full rounded-xl overflow-hidden bg-black/40">
             <Suspense fallback={
@@ -21,7 +22,7 @@ export function Scene({ aggressiveness, medicineEffect, showGenes }: SceneProps)
                 </div>
             }>
                 <Canvas gl={{ antialias: true, alpha: true }}>
-                    <PerspectiveCamera makeDefault position={[0, 0, 5]} fov={45} />
+                    <PerspectiveCamera makeDefault position={[0, 0, 8]} fov={45} />
                     <OrbitControls
                         enablePan={false}
                         minDistance={2}
@@ -38,6 +39,7 @@ export function Scene({ aggressiveness, medicineEffect, showGenes }: SceneProps)
                         aggressiveness={aggressiveness}
                         medicineEffect={medicineEffect}
                         showGenes={showGenes}
+                        time={time}
                     />
 
                     <Environment preset="city" />
