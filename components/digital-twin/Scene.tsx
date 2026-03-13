@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useEffect, useRef } from "react"
+import { Suspense, useEffect, useRef, useState } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Environment, PerspectiveCamera, PerformanceMonitor } from "@react-three/drei"
 import { TumorModel } from "./TumorModel"
@@ -19,6 +19,7 @@ interface SceneProps {
 
 export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateEnabled, zoomLevel, recoveryProgress, tumorIntensity }: SceneProps) {
     const canvasRef = useRef<HTMLDivElement>(null)
+    const [isLowPowerMode, setIsLowPowerMode] = useState(false)
 
     useEffect(() => {
         const handleContextLost = (event: Event) => {
@@ -34,35 +35,7 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
             }
         }
 
-        // Suppress THREE.Clock deprecation warnings from console
-        const originalWarn = console.warn
-        const originalError = console.error
-        const warnFilter = (args: any) => {
-            const message = typeof args === 'string' ? args : String(args)
-            if (
-                message.includes('THREE.Clock') ||
-                message.includes('THREE.Timer') ||
-                message.includes('WebGLRenderer: Context Lost')
-            ) {
-                return // Suppress these expected warnings
-            }
-            originalWarn(args)
-        }
-        const errorFilter = (args: any) => {
-            const message = typeof args === 'string' ? args : String(args)
-            if (message.includes('WebGL context lost')) {
-                return // Suppress expected warnings
-            }
-            originalError(args)
-        }
-        
-        console.warn = warnFilter as any
-        console.error = errorFilter as any
-
-        return () => {
-            console.warn = originalWarn
-            console.error = originalError
-        }
+        return
     }, [])
 
     return (
@@ -73,9 +46,10 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
                 </div>
             }>
                 <Canvas
-                    dpr={[1, 1.5]}
+                    dpr={isLowPowerMode ? [1, 1.25] : [1, 1.5]}
+                    frameloop={rotateEnabled || showGenes || medicineEffect !== "none" ? "always" : "demand"}
                     gl={{
-                        antialias: true,
+                        antialias: false,
                         alpha: true,
                         powerPreference: "high-performance",
                         preserveDrawingBuffer: false,
@@ -100,8 +74,8 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
                     />
 
                     <PerformanceMonitor
-                        onDecline={() => console.warn("Performance declining")}
-                        onIncline={() => console.log("Performance improving")}
+                        onDecline={() => setIsLowPowerMode(true)}
+                        onIncline={() => setIsLowPowerMode(false)}
                     >
                         <ambientLight intensity={0.5} />
                         <directionalLight position={[10, 10, 5]} intensity={1} />
@@ -116,7 +90,7 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
                             tumorIntensity={tumorIntensity}
                         />
 
-                        <Environment preset="city" />
+                        <Environment preset="apartment" frames={1} />
                     </PerformanceMonitor>
                 </Canvas>
             </Suspense>

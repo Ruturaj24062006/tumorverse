@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useMemo } from "react"
+import { useEffect, useRef, useMemo } from "react"
 import { useFrame } from "@react-three/fiber"
 import { Sphere, MeshDistortMaterial } from "@react-three/drei"
 import * as THREE from "three"
@@ -17,6 +17,7 @@ interface TumorModelProps {
 export function TumorModel({ aggressiveness, medicineEffect, showGenes, time, recoveryProgress, tumorIntensity }: TumorModelProps) {
   const meshRef = useRef<THREE.Mesh>(null)
   const particlesRef = useRef<THREE.InstancedMesh>(null)
+  const elapsedRef = useRef(0)
 
   // Base properties based on aggressiveness
   const baseColor =
@@ -111,21 +112,28 @@ export function TumorModel({ aggressiveness, medicineEffect, showGenes, time, re
     return matrices
   }, [particleCount, currentScale, medicineEffect, tumorIntensity])
 
-  useFrame((state) => {
+  useEffect(() => {
+    if (!particlesRef.current || !showGenes) return
+
+    particleMatrices.forEach((matrix, index) => {
+      particlesRef.current?.setMatrixAt(index, matrix)
+    })
+    particlesRef.current.instanceMatrix.needsUpdate = true
+  }, [particleMatrices, showGenes])
+
+  useFrame((_, delta) => {
+    const safeDelta = Math.min(delta, 0.05)
+    elapsedRef.current += safeDelta
+
     if (meshRef.current) {
-      meshRef.current.rotation.x = state.clock.getElapsedTime() * 0.2 * currentSpeed
-      meshRef.current.rotation.y = state.clock.getElapsedTime() * 0.3 * currentSpeed
+      meshRef.current.rotation.x = elapsedRef.current * 0.2 * currentSpeed
+      meshRef.current.rotation.y = elapsedRef.current * 0.3 * currentSpeed
       meshRef.current.scale.lerp(new THREE.Vector3(currentScale, currentScale, currentScale), 0.05)
     }
 
     if (particlesRef.current && showGenes) {
-      particlesRef.current.rotation.y = state.clock.getElapsedTime() * 0.1 * currentSpeed
-      particlesRef.current.rotation.x = state.clock.getElapsedTime() * 0.05 * currentSpeed
-
-      particleMatrices.forEach((matrix, index) => {
-        particlesRef.current?.setMatrixAt(index, matrix)
-      })
-      particlesRef.current.instanceMatrix.needsUpdate = true
+      particlesRef.current.rotation.y = elapsedRef.current * 0.1 * currentSpeed
+      particlesRef.current.rotation.x = elapsedRef.current * 0.05 * currentSpeed
     }
   })
 
