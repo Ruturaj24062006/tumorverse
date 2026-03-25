@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react"
 import { Canvas } from "@react-three/fiber"
 import { OrbitControls, Environment, PerspectiveCamera, PerformanceMonitor } from "@react-three/drei"
+import * as THREE from "three"
 import { TumorModel } from "./TumorModel"
 import { Loader2 } from "lucide-react"
 
@@ -15,9 +16,29 @@ interface SceneProps {
     zoomLevel: number
     recoveryProgress: number
     tumorIntensity: number
+    lesionCoverage?: number
+    lesionConfidence?: number
+    lesionFocus?: {
+        x: number
+        y: number
+    } | null
+    buildProgress?: number
 }
 
-export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateEnabled, zoomLevel, recoveryProgress, tumorIntensity }: SceneProps) {
+export function Scene({
+    aggressiveness,
+    medicineEffect,
+    showGenes,
+    time,
+    rotateEnabled,
+    zoomLevel,
+    recoveryProgress,
+    tumorIntensity,
+    lesionCoverage,
+    lesionConfidence,
+    lesionFocus,
+    buildProgress = 1,
+}: SceneProps) {
     const canvasRef = useRef<HTMLDivElement>(null)
     const [isLowPowerMode, setIsLowPowerMode] = useState(false)
 
@@ -39,7 +60,7 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
     }, [])
 
     return (
-        <div className="relative h-full w-full rounded-xl overflow-hidden bg-black/40" ref={canvasRef}>
+        <div className="relative h-full w-full rounded-xl overflow-hidden" style={{ background: "radial-gradient(ellipse at center, #0d1f35 0%, #060e1a 100%)" }} ref={canvasRef}>
             <Suspense fallback={
                 <div className="absolute inset-0 flex items-center justify-center text-[#00E5FF]">
                     <Loader2 className="h-8 w-8 animate-spin" />
@@ -48,19 +69,21 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
                 <Canvas
                     dpr={isLowPowerMode ? [1, 1.25] : [1, 1.5]}
                     frameloop={rotateEnabled || showGenes || medicineEffect !== "none" ? "always" : "demand"}
+                    style={{ background: "transparent" }}
                     gl={{
-                        antialias: false,
-                        alpha: true,
+                        antialias: true,
+                        alpha: false,
                         powerPreference: "high-performance",
                         preserveDrawingBuffer: false,
                         stencil: false,
                         depth: true,
                         logarithmicDepthBuffer: false,
                     }}
-                    onCreated={({ gl }) => {
+                    onCreated={({ gl, scene }) => {
                         gl.domElement.addEventListener("webglcontextlost", (event) => {
                             event.preventDefault()
                         })
+                        scene.background = new THREE.Color("#060e1a")
                     }}
                 >
                     <PerspectiveCamera makeDefault position={[0, 0, zoomLevel]} fov={45} />
@@ -88,6 +111,10 @@ export function Scene({ aggressiveness, medicineEffect, showGenes, time, rotateE
                             time={time}
                             recoveryProgress={recoveryProgress}
                             tumorIntensity={tumorIntensity}
+                            lesionCoverage={lesionCoverage}
+                            lesionConfidence={lesionConfidence}
+                            lesionFocus={lesionFocus}
+                            buildProgress={buildProgress}
                         />
 
                         <Environment preset="apartment" frames={1} />

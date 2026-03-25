@@ -4,6 +4,7 @@ Loads pre-trained models and exposes a prediction endpoint.
 """
 
 import os
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 import io
@@ -15,6 +16,22 @@ from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from routes.predict_image import router as image_router
+
+try:
+    from utils.digital_twin_predict import digital_twin_predictor
+except Exception as exc:
+    digital_twin_predictor = None
+    DIGITAL_TWIN_IMPORT_ERROR = exc
+else:
+    DIGITAL_TWIN_IMPORT_ERROR = None
+
+try:
+    from utils.medicine_simulator import medicine_simulator
+except Exception as exc:
+    medicine_simulator = None
+    MEDICINE_SIM_IMPORT_ERROR = exc
+else:
+    MEDICINE_SIM_IMPORT_ERROR = None
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -587,6 +604,93 @@ async def batch_predict(data: dict):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
+
+
+@app.post("/analyze")
+async def analyze_tumor_response(
+    file: UploadFile = File(...),
+    medicine_type: str = Form("gefitinib"),
+    dosage: float = Form(50.0),
+):
+    """
+    Multimodal analysis endpoint:
+    1. Segment tumor via U-Net digital twin model.
+    2. Compute tumor size from the generated mask.
+    3. Predict tumor reduction using medicine simulation model.
+    """
+    filename = file.filename or "uploaded_image"
+    suffix = Path(filename).suffix.lower()
+
+    if digital_twin_predictor is None:
+        missing_dependency = getattr(DIGITAL_TWIN_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Digital twin module is unavailable. "
+                f"Missing module: {missing_dependency}. "
+                "Use Python 3.11-3.13 and install backend requirements."
+            ),
+        )
+
+    if medicine_simulator is None:
+        missing_dependency = getattr(MEDICINE_SIM_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Medicine simulation module is unavailable. "
+                f"Missing module: {missing_dependency}."
+            ),
+        )
+
+    allowed_suffixes = {".jpg", ".jpeg", ".png"}
+    if suffix not in allowed_suffixes:
+        raise HTTPException(status_code=400, detail="Only JPG and PNG images are supported.")
+
+    if file.content_type and file.content_type not in {"image/jpeg", "image/png"}:
+        raise HTTPException(status_code=400, detail="Invalid image MIME type. Use JPG or PNG.")
+
+    if dosage < 0:
+        raise HTTPException(status_code=400, detail="Dosage must be non-negative.")
+
+    temp_path = None
+    try:
+        image_bytes = await file.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded image is empty.")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(image_bytes)
+            temp_path = Path(temp_file.name)
+
+        digital_twin_result = digital_twin_predictor.predict_image(temp_path)
+        tumor_size = float(digital_twin_result.get("mask_coverage_pct", 0.0))
+
+        predicted_reduction, confidence = medicine_simulator.predict_reduction(
+            tumor_size=tumor_size,
+            medicine_type=medicine_type,
+            dosage=dosage,
+        )
+
+        return {
+            "tumor_size": round(tumor_size, 4),
+            "predicted_reduction": round(float(predicted_reduction), 4),
+            "confidence": round(float(confidence), 4),
+            "medicine_type": medicine_type,
+            "dosage": float(dosage),
+            "segmentation_confidence": digital_twin_result.get("segmentation_confidence"),
+            "mask_area_ratio": digital_twin_result.get("mask_area_ratio"),
+            "overlay_image": digital_twin_result.get("overlay_image"),
+        }
+    except HTTPException:
+        raise
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Multimodal analysis failed: {exc}") from exc
+    finally:
+        await file.close()
+        if temp_path and temp_path.exists():
+            os.remove(temp_path)
 
 
 if __name__ == "__main__":

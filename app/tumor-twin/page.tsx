@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Scene } from "@/components/digital-twin/Scene"
+import { ClinicalTwinView } from "@/components/digital-twin/ClinicalTwinView"
 import { ControlPanel } from "@/components/digital-twin/ControlPanel"
 import { MedicineAnalysisPanel } from "@/components/digital-twin/MedicineAnalysisPanel"
 import Link from "next/link"
@@ -14,6 +15,7 @@ import {
   Activity,
   ArrowLeft,
   Database,
+  ScanSearch,
   TrendingUp,
   TrendingDown,
   AlertTriangle,
@@ -21,11 +23,14 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  RefreshCw,
   Dna,
 } from "lucide-react"
 import { motion } from "framer-motion"
 import { ConfidenceVisualizer } from "@/components/ui/confidence-visualizer"
 import { MedicineTimeline } from "@/components/ui/medicine-timeline"
+import { loadLatestDigitalTwin } from "@/lib/digitalTwinModule"
+import type { StoredDigitalTwinAnalysis as DigitalTwinAnalysis } from "@/lib/digitalTwinModule"
 
 interface Medicine {
   name: string
@@ -53,9 +58,37 @@ function DigitalTwinContent() {
   const [medicineEffect, setMedicineEffect] = useState<"none" | "effective" | "ineffective">("none")
   const [simulating, setSimulating] = useState(false)
   const [simulationResult, setSimulationResult] = useState<SimulationResponse | null>(null)
+  const [digitalTwinAnalysis, setDigitalTwinAnalysis] = useState<DigitalTwinAnalysis | null>(null)
   const [resetSceneTrigger, setResetSceneTrigger] = useState(0)
   const [recoveryProgress, setRecoveryProgress] = useState(0)
   const [time, setTime] = useState(0)
+  const [twinBuildProgress, setTwinBuildProgress] = useState(0)
+  const [twinReplayNonce, setTwinReplayNonce] = useState(0)
+  const [viewMode, setViewMode] = useState<"clinical" | "3d">("clinical")
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    let frame = 0
+    let startTime = 0
+    const duration = 1800
+
+    const animateBuild = (timestamp: number) => {
+      if (startTime === 0) startTime = timestamp
+      const progress = Math.min(1, (timestamp - startTime) / duration)
+      setTwinBuildProgress(progress)
+      if (progress < 1) {
+        frame = window.requestAnimationFrame(animateBuild)
+      }
+    }
+
+    setTwinBuildProgress(0)
+    frame = window.requestAnimationFrame(animateBuild)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [twinReplayNonce])
 
   useEffect(() => {
     if (!simulationResult || medicineEffect === "none") return
@@ -88,16 +121,29 @@ function DigitalTwinContent() {
     return () => clearInterval(interval)
   }, [])
 
+  useEffect(() => {
+    const currentImageName = searchParams.get("imageName") || ""
+    const twinData = loadLatestDigitalTwin(currentImageName)
+    if (twinData) {
+      setDigitalTwinAnalysis(twinData)
+    }
+  }, [searchParams])
+
   const cancerType = searchParams.get("cancer") || "Unknown Cancer"
-  const aggressiveness = (searchParams.get("aggr") as "low" | "moderate" | "high") || "moderate"
+  const aggressiveness =
+    digitalTwinAnalysis?.aggressiveness || ((searchParams.get("aggr") as "low" | "moderate" | "high") || "moderate")
   const confidence = parseFloat(searchParams.get("conf") || "0")
   const imageName = searchParams.get("imageName") || ""
+  const predictionMode = searchParams.get("predictionMode") || "gene"
 
   const tumorIntensity = Math.min(
     1,
     Math.max(
       0.35,
-      confidence + (aggressiveness === "high" ? 0.15 : aggressiveness === "moderate" ? 0.08 : 0.02) + (imageName ? 0.07 : 0),
+      confidence +
+        (digitalTwinAnalysis?.mask_area_ratio || 0) * 1.75 +
+        (aggressiveness === "high" ? 0.15 : aggressiveness === "moderate" ? 0.08 : 0.02) +
+        (imageName ? 0.07 : 0),
     ),
   )
 
@@ -158,6 +204,7 @@ function DigitalTwinContent() {
 
   const handleResetView = () => {
     setResetSceneTrigger((prev) => prev + 1)
+    setTwinReplayNonce((prev) => prev + 1)
     setMedicineEffect("none")
     setActiveMedicine(null)
     setSimulationResult(null)
@@ -165,6 +212,12 @@ function DigitalTwinContent() {
     setTime(0)
     setZoomLevel(8)
     setRotateEnabled(true)
+  }
+
+  const handleRepeatTwinCreation = () => {
+    setResetSceneTrigger((prev) => prev + 1)
+    setTwinReplayNonce((prev) => prev + 1)
+    setTime(0)
   }
 
   const aggrColor = (a: string) => {
@@ -181,6 +234,12 @@ function DigitalTwinContent() {
   }
 
   const effectivenessPct = simulationResult ? Math.round(simulationResult.effectiveness * 100) : 0
+  const lesionFocus = digitalTwinAnalysis?.bounding_box
+    ? {
+        x: (digitalTwinAnalysis.bounding_box.x_min + digitalTwinAnalysis.bounding_box.x_max) / 2,
+        y: (digitalTwinAnalysis.bounding_box.y_min + digitalTwinAnalysis.bounding_box.y_max) / 2,
+      }
+    : null
 
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: "#0A1628" }}>
@@ -206,7 +265,7 @@ function DigitalTwinContent() {
               </Badge>
             </h1>
             <p className="mt-2 max-w-2xl text-[#8899AA]">
-              Upload-driven 3D tumor twin with medicine testing, recovery timeline, and AI-guided treatment suitability.
+              Upload-driven 3D tumor twin with medicine testing, recovery timeline, AI-guided treatment suitability, and image-based segmentation when available.
             </p>
           </div>
 
@@ -296,8 +355,27 @@ function DigitalTwinContent() {
         >
           <div className="flex flex-col gap-4 lg:col-span-3 xl:col-span-3">
             <div className="glass-panel relative flex-1 overflow-hidden rounded-2xl neon-border">
+              <div className="absolute left-4 top-4 z-30 flex gap-2">
+                <Button
+                  size="sm"
+                  variant={viewMode === "clinical" ? "default" : "outline"}
+                  onClick={() => setViewMode("clinical")}
+                  className={viewMode === "clinical" ? "bg-[#00E5FF] text-[#051425] hover:bg-[#00E5FF]/90" : "border-[#00E5FF]/30 bg-black/40 text-[#00E5FF] hover:bg-[#00E5FF]/15"}
+                >
+                  Clinical View
+                </Button>
+                <Button
+                  size="sm"
+                  variant={viewMode === "3d" ? "default" : "outline"}
+                  onClick={() => setViewMode("3d")}
+                  className={viewMode === "3d" ? "bg-[#00E5FF] text-[#051425] hover:bg-[#00E5FF]/90" : "border-[#00E5FF]/30 bg-black/40 text-[#00E5FF] hover:bg-[#00E5FF]/15"}
+                >
+                  3D View
+                </Button>
+              </div>
+
               {activeMedicine && (
-                <div className="animate-in fade-in zoom-in-95 absolute left-4 top-4 z-10 rounded-lg border border-[#8A2BE2]/30 glass-panel bg-black/40 p-3 backdrop-blur-md">
+                <div className="animate-in fade-in zoom-in-95 absolute left-4 top-16 z-10 rounded-lg border border-[#8A2BE2]/30 glass-panel bg-black/40 p-3 backdrop-blur-md">
                   <p className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-[#8899AA]">
                     <Database className="h-3 w-3 text-[#8A2BE2]" /> Active Simulation
                   </p>
@@ -316,18 +394,38 @@ function DigitalTwinContent() {
                 </div>
               )}
 
-              <Scene
-                key={resetSceneTrigger}
-                aggressiveness={aggressiveness}
-                medicineEffect={medicineEffect}
-                showGenes={showGenes}
-                time={time}
-                rotateEnabled={rotateEnabled}
-                zoomLevel={zoomLevel}
-                recoveryProgress={recoveryProgress}
-                tumorIntensity={tumorIntensity}
-              />
+              {viewMode === "3d" ? (
+                <Scene
+                  key={resetSceneTrigger}
+                  aggressiveness={aggressiveness}
+                  medicineEffect={medicineEffect}
+                  showGenes={showGenes}
+                  time={time}
+                  rotateEnabled={rotateEnabled}
+                  zoomLevel={zoomLevel}
+                  recoveryProgress={recoveryProgress}
+                  tumorIntensity={tumorIntensity}
+                  lesionCoverage={digitalTwinAnalysis?.mask_area_ratio}
+                  lesionConfidence={digitalTwinAnalysis?.segmentation_confidence}
+                  lesionFocus={lesionFocus}
+                  buildProgress={twinBuildProgress}
+                />
+              ) : (
+                <ClinicalTwinView
+                  aggressiveness={aggressiveness}
+                  medicineEffect={medicineEffect}
+                  recoveryProgress={recoveryProgress}
+                  time={time}
+                  tumorIntensity={tumorIntensity}
+                  lesionCoverage={digitalTwinAnalysis?.mask_area_ratio}
+                  lesionConfidence={digitalTwinAnalysis?.segmentation_confidence}
+                  lesionFocus={lesionFocus}
+                  sourceImageUrl={digitalTwinAnalysis?.overlay_image}
+                  sourceImageName={imageName}
+                />
+              )}
 
+              {viewMode === "3d" && (
               <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
                 <Button
                   size="icon"
@@ -373,13 +471,24 @@ function DigitalTwinContent() {
                 <Button
                   size="icon"
                   variant="outline"
+                  onClick={handleRepeatTwinCreation}
+                  className="h-9 w-9 rounded-full border-[#00E5FF]/30 bg-black/50 text-[#00E5FF] hover:bg-[#00E5FF]/15"
+                  title="Repeat Twin Creation"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
                   onClick={handleResetView}
                   className="h-9 w-9 rounded-full border-[#8899AA]/30 bg-black/50 text-[#8899AA] hover:bg-[#8899AA]/15"
                 >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
               </div>
+              )}
 
+              {viewMode === "3d" && (
               <div className="absolute bottom-4 left-4 z-10 flex flex-col gap-2">
                 <div className="flex items-center gap-2 text-[10px] text-[#8899AA]">
                   <span className="h-2 w-2 rounded-full bg-[#00E5FF] shadow-[0_0_5px_#00E5FF]"></span>
@@ -390,6 +499,7 @@ function DigitalTwinContent() {
                   <span>Tumor Intensity</span>
                 </div>
               </div>
+              )}
             </div>
 
             <ControlPanel
@@ -406,6 +516,38 @@ function DigitalTwinContent() {
               setRecoveryProgress={setRecoveryProgress}
               onResetView={handleResetView}
             />
+
+            {digitalTwinAnalysis?.available && (
+              <div className="glass-panel rounded-2xl p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">
+                    <ScanSearch className="h-4 w-4 text-[#00E5FF]" /> Segmentation Metrics
+                  </h3>
+                  <Badge className="border-0 bg-[#00E5FF]/10 text-[#00E5FF]">
+                    {predictionMode === "image" ? "Image-Driven Twin" : "Hybrid Twin"}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="text-xs uppercase tracking-wider text-[#8899AA]">Tumor Coverage</p>
+                    <p className="mt-1 text-xl font-bold text-[#E8EDF2]">{digitalTwinAnalysis.mask_coverage_pct.toFixed(1)}%</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="text-xs uppercase tracking-wider text-[#8899AA]">Segmentation Confidence</p>
+                    <p className="mt-1 text-xl font-bold text-[#00E5FF]">
+                      {(digitalTwinAnalysis.segmentation_confidence * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="text-xs uppercase tracking-wider text-[#8899AA]">Risk Level</p>
+                    <p className="mt-1 text-xl font-bold capitalize" style={{ color: aggrColor(aggressiveness) }}>
+                      {aggressiveness}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {simulationResult && (
               <div className="glass-panel rounded-2xl p-4">

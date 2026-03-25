@@ -81,7 +81,7 @@ export default function HomePage() {
         <div className="absolute inset-0">
           <DNAHelix />
         </div>
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#0A1628]/30 to-[#0A1628]" />
+        <div className="absolute inset-0 bg-linear-to-b from-transparent via-[#0A1628]/30 to-[#0A1628]" />
 
         <div className="relative z-10 mx-auto flex max-w-7xl flex-col items-center px-6 text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#00E5FF]/20 bg-[#00E5FF]/5 px-4 py-1.5">

@@ -7,6 +7,7 @@ import * as THREE from "three"
 
 function StarField() {
   const ref = useRef<THREE.Points>(null)
+  const elapsedRef = useRef(0)
   
   // Create 2000 random points in a sphere
   const particles = useMemo(() => {
@@ -20,10 +21,11 @@ function StarField() {
   }, [])
 
   // Slow rotation animation
-  useFrame((state) => {
+  useFrame((_, delta) => {
+    elapsedRef.current += Math.min(delta, 0.05)
     if (ref.current) {
-      ref.current.rotation.x = state.clock.getElapsedTime() * 0.05
-      ref.current.rotation.y = state.clock.getElapsedTime() * 0.03
+      ref.current.rotation.x = elapsedRef.current * 0.05
+      ref.current.rotation.y = elapsedRef.current * 0.03
     }
   })
 

@@ -24,6 +24,8 @@ import { AILoading } from "@/components/ui/ai-loading"
 import { ErrorPanel } from "@/components/ui/error-panel"
 import { ConfidenceVisualizer } from "@/components/ui/confidence-visualizer"
 import { GeneVisualizer } from "@/components/ui/gene-visualizer"
+import { saveLatestDigitalTwin } from "@/lib/digitalTwinModule"
+import type { DigitalTwinAnalysis } from "@/lib/digitalTwinModule"
 import { motion } from "framer-motion"
 
 interface GeneImportance {
@@ -52,6 +54,7 @@ interface PredictionResult {
   }
   sample_count: number
   model_version: string
+  digital_twin?: DigitalTwinAnalysis
 }
 
 export default function PredictionPage() {
@@ -251,6 +254,13 @@ export default function PredictionPage() {
       // Parse successful response
       const data = await res.json()
       console.log("✅ Prediction successful:", data)
+
+      if (typeof window !== "undefined") {
+        saveLatestDigitalTwin(data.digital_twin, {
+          sourceImageName: imageFile?.name || file?.name || "",
+          tumorType: data.tumor_type || "unknown",
+        })
+      }
       
       const mappedAggressiveness = (data.tumor_aggressiveness || data.aggressiveness || "").toString().toLowerCase()
       const normalizedAggressiveness: "low" | "moderate" | "high" =
@@ -264,15 +274,15 @@ export default function PredictionPage() {
         ? {
             cancer_type: data.tumor_type || "Unknown",
             confidence: data.confidence || 0,
-            // Image model predicts presence/type, not clinical aggressiveness.
-            aggressiveness: data.tumor_detected ? "moderate" : "low",
+            aggressiveness: data.digital_twin?.aggressiveness || (data.tumor_detected ? "moderate" : "low"),
             prediction_mode: "image",
             tumor_detected: !!data.tumor_detected,
             tumor_type: data.tumor_type || "unknown",
             top_genes: [],
-            medicines: { recommended: [], notRecommended: [] },
+            medicines: data.medicines || { recommended: [], notRecommended: [] },
             sample_count: 1,
-            model_version: data.model_version || "Tumor CNN"
+            model_version: data.model_version || "Tumor CNN + Digital Twin",
+            digital_twin: data.digital_twin,
           }
         : {
             cancer_type: data.cancer_type || data.predicted_cancer || "Unknown",
@@ -282,7 +292,8 @@ export default function PredictionPage() {
             top_genes: data.important_genes || data.top_genes || [],
             medicines: data.medicines || { recommended: [], notRecommended: [] },
             sample_count: data.sample_count || 1,
-            model_version: data.model_version || "1.0.0"
+            model_version: data.model_version || "1.0.0",
+            digital_twin: data.digital_twin,
           }
       
       console.log("📊 Transformed result:", transformedResult)
@@ -559,7 +570,6 @@ export default function PredictionPage() {
             </div>
 
             {/* Actions for next step */}
-            {predictionResult.prediction_mode !== "image" && (
             <div className="flex flex-col items-center justify-center gap-4 py-8">
               <div className="flex items-center gap-2">
                 <div className="h-px w-12 bg-linear-to-r from-transparent to-[#8A2BE2]/50"></div>
@@ -575,6 +585,7 @@ export default function PredictionPage() {
                     aggr: predictionResult.aggressiveness,
                     conf: predictionResult.confidence.toString(),
                     imageName: imageFile?.name || "",
+                    predictionMode: predictionResult.prediction_mode,
                     genes: JSON.stringify(predictionResult.top_genes.slice(0, 3)),
                     medsRecommended: JSON.stringify(predictionResult.medicines.recommended),
                     medsNotRecommended: JSON.stringify(predictionResult.medicines.notRecommended)
@@ -588,7 +599,6 @@ export default function PredictionPage() {
                 Create a 3D simulation to analyze medicine compatibility and observe potential tumor responses.
               </p>
             </div>
-            )}
 
 
             {/* Gene Visualization */}
