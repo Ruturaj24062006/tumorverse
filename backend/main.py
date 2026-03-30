@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from routes.predict_image import router as image_router
+from routes.recommend import router as recommend_router
 
 try:
     from utils.digital_twin_predict import digital_twin_predictor
@@ -50,6 +51,7 @@ app.add_middleware(
 )
 
 app.include_router(image_router)
+app.include_router(recommend_router)
 
 # Define paths to model files
 MODEL_DIR = Path(__file__).parent / "model"

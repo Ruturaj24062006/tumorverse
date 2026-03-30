@@ -152,7 +152,6 @@ async def predict(
     }
 ```
 
----
 
 ## 🧪 Live Test Results
 

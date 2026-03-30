@@ -40,11 +40,22 @@ interface Medicine {
 }
 
 interface SimulationResponse {
+  selected_drug?: string
+  best_drug?: string
+  confidence: number
   effectiveness: number
-  recovery_timeline: Record<string, string>
+  recovery: Record<string, string>
+  recovery_timeline?: Record<string, string>
+  top_3_drugs?: string[]
   effective: boolean
   explanation?: string
   risk_message?: string
+}
+
+function parseMonths(value?: string): number {
+  if (!value) return 0
+  const numeric = Number.parseFloat(value)
+  return Number.isFinite(numeric) ? numeric : 0
 }
 
 function DigitalTwinContent() {
@@ -93,25 +104,30 @@ function DigitalTwinContent() {
   useEffect(() => {
     if (!simulationResult || medicineEffect === "none") return
 
-    const timelineTargets = medicineEffect === "effective" ? [25, 50, 75, 100] : [25, 50, 75, 100]
-    let currentIndex = 0
+    const timeline = simulationResult.recovery || simulationResult.recovery_timeline || {}
+    const totalMonths = Math.max(parseMonths(timeline["75%"]), parseMonths(timeline["50%"]), 0.1)
+    const simulationDurationMs = Math.max(2500, Math.min(18000, totalMonths * 700))
 
-    const interval = setInterval(() => {
-      if (currentIndex >= timelineTargets.length) {
-        clearInterval(interval)
-        return
+    let frame = 0
+    let startAt = 0
+
+    const animateProgress = (timestamp: number) => {
+      if (startAt === 0) startAt = timestamp
+      const elapsed = timestamp - startAt
+      const ratio = Math.min(1, elapsed / simulationDurationMs)
+      setRecoveryProgress(ratio * 75)
+
+      if (ratio < 1) {
+        frame = window.requestAnimationFrame(animateProgress)
       }
+    }
 
-      const target = timelineTargets[currentIndex]
-      if (medicineEffect === "effective") {
-        setRecoveryProgress(target)
-      } else {
-        setRecoveryProgress(Math.min(target, 100))
-      }
-      currentIndex += 1
-    }, 1500)
+    setRecoveryProgress(0)
+    frame = window.requestAnimationFrame(animateProgress)
 
-    return () => clearInterval(interval)
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
   }, [simulationResult, medicineEffect])
 
   useEffect(() => {
@@ -163,19 +179,24 @@ function DigitalTwinContent() {
     setActiveMedicine(selectedMedicine)
     setMedicineEffect("none")
     setSimulationResult(null)
-  setRecoveryProgress(0)
+    setRecoveryProgress(0)
 
     try {
       const res = await fetch("/api/simulate-medicine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tumor_type: cancerType, medicine: selectedMedicine }),
+        body: JSON.stringify({
+          tumor_type: cancerType,
+          medicine: selectedMedicine,
+          tumor_size: Math.max(0.1, digitalTwinAnalysis?.mask_coverage_pct || tumorIntensity * 100),
+        }),
       })
 
       if (res.ok) {
         const data = (await res.json()) as SimulationResponse
         setSimulationResult(data)
-        const effective = data.effective ?? data.effectiveness >= 0.65
+        const modelScore = Number.isFinite(data.confidence) ? data.confidence : data.effectiveness
+        const effective = data.effective ?? modelScore >= 0.55
         setMedicineEffect(effective ? "effective" : "ineffective")
         setRecoveryProgress(0)
 
@@ -186,8 +207,8 @@ function DigitalTwinContent() {
             patientId: `P${String(Math.floor(Math.random() * 9000) + 1000)}`,
             cancerType,
             medicineTested: selectedMedicine,
-            result: effective ? "effective" : data.effectiveness >= 0.45 ? "moderate" : "ineffective",
-            effectiveness: data.effectiveness,
+            result: effective ? "effective" : modelScore >= 0.35 ? "moderate" : "ineffective",
+            effectiveness: modelScore,
             date: new Date().toISOString(),
             confidence,
           }
@@ -226,14 +247,14 @@ function DigitalTwinContent() {
     return "#00FF9C"
   }
 
-  const recoveryTimeline = simulationResult?.recovery_timeline || {
-    "25%": "3 months",
-    "50%": "6 months",
-    "75%": "10 months",
-    "100%": "14 months",
-  }
+  const recoveryTimeline = simulationResult?.recovery || simulationResult?.recovery_timeline || {}
 
-  const effectivenessPct = simulationResult ? Math.round(simulationResult.effectiveness * 100) : 0
+  const modelEffectiveness = simulationResult
+    ? Number.isFinite(simulationResult.confidence)
+      ? simulationResult.confidence
+      : simulationResult.effectiveness
+    : 0
+  const effectivenessPct = Math.round(modelEffectiveness * 100)
   const lesionFocus = digitalTwinAnalysis?.bounding_box
     ? {
         x: (digitalTwinAnalysis.bounding_box.x_min + digitalTwinAnalysis.bounding_box.x_max) / 2,
@@ -318,10 +339,10 @@ function DigitalTwinContent() {
                 <div className="mb-2 flex items-baseline justify-between">
                   <span className="text-xs text-[#8899AA]">Tumor Recovery Simulation</span>
                   <span className="text-2xl font-bold" style={{ color: medicineEffect === "effective" ? "#00FF9C" : "#FF3B5C" }}>
-                    {medicineEffect === "effective" ? `${Math.round(recoveryProgress)}%` : "0%"}
+                    {`${Math.round(recoveryProgress)}%`}
                   </span>
                 </div>
-                <Progress value={medicineEffect === "effective" ? recoveryProgress : Math.min(100, 15 + time)} className="h-2" />
+                <Progress value={Math.min(100, recoveryProgress)} className="h-2" />
                 <style jsx global>{`
                   [data-slot="progress-indicator"] {
                     background: ${medicineEffect === "effective" ? "#00FF9C" : "#FF3B5C"} !important;
@@ -557,9 +578,9 @@ function DigitalTwinContent() {
                     <div key={value}>
                       <div className="mb-1 flex items-center justify-between text-xs">
                         <span className="text-[#8899AA]">{value}% improvement</span>
-                        <span className="font-semibold text-[#00E5FF]">{recoveryTimeline[`${value}%`]}</span>
+                        <span className="font-semibold text-[#00E5FF]">{recoveryTimeline[`${value}%`] || "--"}</span>
                       </div>
-                      <Progress value={value} className="h-2" />
+                      <Progress value={Math.min(100, (recoveryProgress / value) * 100)} className="h-2" />
                     </div>
                   ))}
                             {simulationResult && activeMedicine && medicineEffect !== "none" && (
@@ -567,6 +588,7 @@ function DigitalTwinContent() {
                                 timeline={recoveryTimeline}
                                 medicineEffect={medicineEffect as "effective" | "ineffective"}
                                 activeMedicine={activeMedicine}
+                                progress={recoveryProgress}
                               />
                             )}
                 </div>
@@ -577,15 +599,8 @@ function DigitalTwinContent() {
           <div className="flex flex-col overflow-hidden border-l border-white/5 pl-2 lg:col-span-2 lg:pl-6 xl:col-span-2">
             <MedicineAnalysisPanel
               cancerType={cancerType}
-              recommended={recommended.length ? recommended : [
-                { name: "Gefitinib", confidence: 0.82, mechanism: "EGFR Tyrosine Kinase Inhibitor" },
-                { name: "Cisplatin", confidence: 0.76, mechanism: "DNA Cross-linking Agent" },
-                { name: "Trastuzumab", confidence: 0.71, mechanism: "HER2 receptor blockade" },
-              ]}
-              notRecommended={notRecommended.length ? notRecommended : [
-                { name: "Paclitaxel", confidence: 0.4, reason: "Resistance markers detected in this profile" },
-                { name: "Doxorubicin", confidence: 0.33, reason: "Low predicted compatibility" },
-              ]}
+              recommended={recommended}
+              notRecommended={notRecommended}
               selectedMedicine={selectedMedicine}
               onMedicineChange={setSelectedMedicine}
               onTestMedicine={handleSimulateDrug}
@@ -599,16 +614,16 @@ function DigitalTwinContent() {
                 </h3>
                 <div className="mt-3 space-y-2 text-sm">
                   <p className="text-[#8899AA]">Cancer Type: <span className="font-semibold text-[#E8EDF2]">{cancerType}</span></p>
-                  <p className="text-[#8899AA]">Medicine Tested: <span className="font-semibold text-[#E8EDF2]">{activeMedicine}</span></p>
+                  <p className="text-[#8899AA]">Medicine Tested: <span className="font-semibold text-[#E8EDF2]">{simulationResult.selected_drug || activeMedicine}</span></p>
+                  <p className="text-[#8899AA]">Best Drug Predicted: <span className="font-semibold text-[#E8EDF2]">{simulationResult.best_drug || "N/A"}</span></p>
                   <p className="text-[#8899AA]">Effectiveness: <span className="font-semibold text-[#00E5FF]">{effectivenessPct}%</span></p>
                 </div>
 
                 <div className="mt-4 space-y-2 border-t border-white/10 pt-3 text-xs">
                   <p className="font-semibold text-[#E8EDF2]">Recovery Prediction:</p>
-                  <p className="text-[#8899AA]">25% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["25%"]}</span></p>
-                  <p className="text-[#8899AA]">50% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["50%"]}</span></p>
-                  <p className="text-[#8899AA]">75% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["75%"]}</span></p>
-                  <p className="text-[#8899AA]">100% recovery → <span className="text-[#00E5FF]">{recoveryTimeline["100%"]}</span></p>
+                  <p className="text-[#8899AA]">25% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["25%"] || "--"}</span></p>
+                  <p className="text-[#8899AA]">50% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["50%"] || "--"}</span></p>
+                  <p className="text-[#8899AA]">75% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["75%"] || "--"}</span></p>
                 </div>
 
                 {simulationResult.explanation && (

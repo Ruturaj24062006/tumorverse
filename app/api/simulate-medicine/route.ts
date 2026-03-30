@@ -1,52 +1,67 @@
 import { NextResponse } from "next/server"
 
-const MEDICINE_RULES: Record<string, { recommended: string[]; notRecommended: string[] }> = {
-  "lung adenocarcinoma": {
-    recommended: ["gefitinib", "cisplatin", "pembrolizumab"],
-    notRecommended: ["trastuzumab", "imatinib"],
-  },
-  "breast invasive carcinoma": {
-    recommended: ["trastuzumab", "paclitaxel", "tamoxifen"],
-    notRecommended: ["gefitinib", "sorafenib"],
-  },
-  "colon adenocarcinoma": {
-    recommended: ["5-fluorouracil", "oxaliplatin", "cetuximab"],
-    notRecommended: ["trastuzumab", "imatinib"],
-  },
-}
-
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 function normalizeText(input: string) {
   return input.trim().toLowerCase()
 }
 
-function buildRecoveryTimeline(effectiveness: number) {
-  const fast = effectiveness >= 0.8
-  const medium = effectiveness >= 0.65 && effectiveness < 0.8
+function mapTumorToCancerCode(tumorTypeRaw: string): string {
+  const tumorType = normalizeText(tumorTypeRaw)
+  if (tumorType.includes("lung") || tumorType.includes("luad")) return "LUAD"
+  if (tumorType.includes("breast") || tumorType.includes("brca")) return "BRCA"
+  if (tumorType.includes("colon") || tumorType.includes("coad") || tumorType.includes("colorectal")) return "COREAD"
+  if (tumorType.includes("glioma") || tumorType.includes("gbm")) return "GBM"
+  if (tumorType.includes("kidney") || tumorType.includes("kirc")) return "KIRC"
+  return "LUAD"
+}
 
-  if (fast) {
-    return {
-      "25%": "2 months",
-      "50%": "5 months",
-      "75%": "9 months",
-      "100%": "14 months",
-    }
+function derivePathwayAndTarget(medicineRaw: string): { pathway: string; target: string } {
+  const med = normalizeText(medicineRaw)
+
+  if (med.includes("gefitinib") || med.includes("erlotinib") || med.includes("afatinib") || med.includes("cetuximab")) {
+    return { pathway: "EGFR signaling", target: "EGFR" }
+  }
+  if (med.includes("imatinib") || med.includes("dasatinib") || med.includes("nilotinib")) {
+    return { pathway: "ABL signaling", target: "ABL" }
+  }
+  if (med.includes("cisplatin") || med.includes("oxaliplatin") || med.includes("carboplatin")) {
+    return { pathway: "DNA replication", target: "DNA crosslinker" }
+  }
+  if (med.includes("paclitaxel") || med.includes("docetaxel") || med.includes("methotrexate")) {
+    return { pathway: "DNA replication", target: "Antimetabolite" }
   }
 
-  if (medium) {
-    return {
-      "25%": "3 months",
-      "50%": "6 months",
-      "75%": "10 months",
-      "100%": "16 months",
-    }
-  }
+  return { pathway: "EGFR signaling", target: "EGFR" }
+}
 
-  return {
-    "25%": "5 months",
-    "50%": "10 months",
-    "75%": "18 months",
-    "100%": "Not expected with this medicine",
-  }
+function deriveCellLine(cancerCode: string): string {
+  // Use class names that match the training label encoder vocabulary.
+  if (cancerCode === "BRCA") return "MCF7"
+  if (cancerCode === "COREAD") return "HT-29"
+  if (cancerCode === "GBM") return "U-87-MG"
+  if (cancerCode === "KIRC") return "786-0"
+  return "A549"
+}
+
+async function requestRecommendation(payload: {
+  cell_line: string
+  cancer_type: string
+  pathway: string
+  target: string
+  tumor_size: number
+  medicine: string
+}) {
+  const response = await fetch(`${API_BASE_URL}/recommend`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  })
+
+  const data = await response.json()
+  return { response, data }
 }
 
 export async function POST(req: Request) {
@@ -54,48 +69,62 @@ export async function POST(req: Request) {
     const body = await req.json()
     const tumorTypeRaw = typeof body?.tumor_type === "string" ? body.tumor_type : ""
     const medicineRaw = typeof body?.medicine === "string" ? body.medicine : ""
+    const tumorSize = Number(body?.tumor_size)
 
-    if (!tumorTypeRaw || !medicineRaw) {
-      return NextResponse.json({ error: "Missing tumor_type or medicine" }, { status: 400 })
+    if (!tumorTypeRaw || !medicineRaw || !Number.isFinite(tumorSize) || tumorSize <= 0) {
+      return NextResponse.json({ error: "Missing or invalid tumor_type, medicine, or tumor_size" }, { status: 400 })
     }
 
-    const tumorType = normalizeText(tumorTypeRaw)
-    const medicine = normalizeText(medicineRaw)
+    const cancerType = mapTumorToCancerCode(tumorTypeRaw)
+    const { pathway, target } = derivePathwayAndTarget(medicineRaw)
+    const cellLine = deriveCellLine(cancerType)
 
-    const matchedRule = Object.entries(MEDICINE_RULES).find(([key]) => tumorType.includes(key))?.[1]
+    let { response: recommendationResponse, data: recommendationData } = await requestRecommendation({
+      cell_line: cellLine,
+      cancer_type: cancerType,
+      pathway,
+      target,
+      tumor_size: tumorSize,
+      medicine: medicineRaw,
+    })
 
-    let effectiveness = 0.45
-    let explanation = "No strong evidence for this medicine with the detected tumor profile."
-    let effective = false
-
-    if (matchedRule?.recommended.some((med) => medicine.includes(med))) {
-      effectiveness = +(0.78 + Math.random() * 0.16).toFixed(2)
-      explanation = "Medicine aligns with known target pathways for this tumor profile."
-      effective = true
-    } else if (matchedRule?.notRecommended.some((med) => medicine.includes(med))) {
-      effectiveness = +(0.25 + Math.random() * 0.2).toFixed(2)
-      explanation = "Medicine is generally not preferred for this tumor profile."
-      effective = false
-    } else if (medicine.includes("gefitinib") || medicine.includes("cisplatin") || medicine.includes("trastuzumab")) {
-      effectiveness = +(0.62 + Math.random() * 0.2).toFixed(2)
-      explanation = "Medicine has partial compatibility with the current tumor characteristics."
-      effective = effectiveness >= 0.65
-    } else {
-      effectiveness = +(0.35 + Math.random() * 0.2).toFixed(2)
-      explanation = "Insufficient compatibility markers for confident treatment response."
-      effective = false
+    // Retry with a known-safe profile if encoder mismatch occurs.
+    if (!recommendationResponse.ok && recommendationResponse.status === 400) {
+      const retry = await requestRecommendation({
+        cell_line: "A549",
+        cancer_type: "LUAD",
+        pathway: "EGFR signaling",
+        target: "EGFR",
+        tumor_size: tumorSize,
+        medicine: medicineRaw,
+      })
+      recommendationResponse = retry.response
+      recommendationData = retry.data
     }
 
-    const recovery_timeline = buildRecoveryTimeline(effectiveness)
+    if (!recommendationResponse.ok) {
+      const detail = recommendationData?.detail || recommendationData?.error || "Failed to get recommendation"
+      return NextResponse.json({ error: detail }, { status: recommendationResponse.status })
+    }
+
+    const confidence = Number(recommendationData?.confidence || 0)
+    const effective = confidence >= 0.55
 
     return NextResponse.json({
-      effectiveness,
-      recovery_timeline,
+      selected_drug: recommendationData?.selected_drug || medicineRaw,
+      best_drug: recommendationData?.best_drug,
+      confidence,
+      effectiveness: confidence,
+      top_3_drugs: Array.isArray(recommendationData?.top_3_drugs) ? recommendationData.top_3_drugs : [],
+      recovery: recommendationData?.recovery || {},
+      recovery_timeline: recommendationData?.recovery || {},
       effective,
-      explanation,
+      explanation: effective
+        ? "Model predicts favorable response for the selected medicine profile."
+        : "Model predicts low response likelihood for the selected medicine profile.",
       risk_message: effective
         ? "Predicted positive response. Continue monitoring progression milestones."
-        : "This medicine may worsen the tumor condition. Consider recommended alternatives.",
+        : "Low predicted response. Consider top-ranked alternatives.",
     })
   } catch (error) {
     console.error("simulate-medicine error", error)

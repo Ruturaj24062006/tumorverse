@@ -11,18 +11,19 @@ interface MedicineTimelineProps {
   timeline: RecoveryTimeline
   medicineEffect: "effective" | "ineffective"
   activeMedicine: string
+  progress: number
 }
 
 export function MedicineTimeline({
   timeline,
   medicineEffect,
   activeMedicine,
+  progress,
 }: MedicineTimelineProps) {
   const timelinePoints = [
     { percent: "25%", label: "1st Phase" },
     { percent: "50%", label: "Halfway" },
     { percent: "75%", label: "Late Stage" },
-    { percent: "100%", label: "Complete" },
   ]
 
   const isEffective = medicineEffect === "effective"
@@ -65,7 +66,7 @@ export function MedicineTimeline({
             className="absolute left-0 top-0 h-1 rounded-full transition-all"
             style={{ backgroundColor: color }}
             initial={{ width: "0%" }}
-            animate={{ width: "100%" }}
+            animate={{ width: `${Math.min(100, (progress / 75) * 100)}%` }}
             transition={{ duration: 2, ease: "easeOut" }}
           />
 
@@ -81,7 +82,7 @@ export function MedicineTimeline({
                   className="mb-2 h-3 w-3 rounded-full border-2"
                   style={{
                     borderColor: color,
-                    backgroundColor: index < timelinePoints.length - 1 ? "transparent" : color,
+                    backgroundColor: progress >= Number.parseInt(point.percent, 10) ? color : "transparent",
                   }}
                   animate={{
                     scale: [1, 1.2, 1],
