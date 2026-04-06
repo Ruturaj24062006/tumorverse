@@ -99,6 +99,21 @@ class DigitalTwinPredictor:
         return f"data:image/png;base64,{encoded}"
 
     @staticmethod
+    def _encode_source_image(image: Image.Image) -> str:
+        buffer = io.BytesIO()
+        image.convert("RGB").save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+
+    @staticmethod
+    def _encode_mask(mask: torch.Tensor) -> str:
+        mask_img = Image.fromarray((mask.cpu().numpy() * 255).astype("uint8"), mode="L")
+        buffer = io.BytesIO()
+        mask_img.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+
+    @staticmethod
     def _build_bbox(mask: torch.Tensor) -> Optional[Dict[str, float]]:
         indices = torch.nonzero(mask > 0, as_tuple=False)
         if indices.numel() == 0:
@@ -145,6 +160,8 @@ class DigitalTwinPredictor:
             "bounding_box": self._build_bbox(binary_mask),
             "image_width": int(original_size[0]),
             "image_height": int(original_size[1]),
+            "source_image": self._encode_source_image(image),
+            "mask_image": self._encode_mask(binary_mask),
             "overlay_image": self._encode_overlay(image, binary_mask),
         }
 

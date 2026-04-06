@@ -16,6 +16,8 @@ export interface DigitalTwinAnalysis {
   bounding_box?: TwinBoundingBox | null
   image_width: number
   image_height: number
+  source_image?: string
+  mask_image?: string
   overlay_image: string
   error?: string
 }
@@ -51,6 +53,8 @@ export function toDigitalTwinAnalysis(raw: unknown): DigitalTwinAnalysis | null 
     bounding_box: (item.bounding_box as TwinBoundingBox | null) || null,
     image_width: Number(item.image_width || 0),
     image_height: Number(item.image_height || 0),
+    source_image: item.source_image ? String(item.source_image) : undefined,
+    mask_image: item.mask_image ? String(item.mask_image) : undefined,
     overlay_image: String(item.overlay_image || ""),
     error: item.error ? String(item.error) : undefined,
   }

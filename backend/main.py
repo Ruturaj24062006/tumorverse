@@ -34,6 +34,14 @@ except Exception as exc:
 else:
     MEDICINE_SIM_IMPORT_ERROR = None
 
+try:
+    from utils.tumor_timeline_simulator import tumor_timeline_simulator
+except Exception as exc:
+    tumor_timeline_simulator = None
+    TUMOR_TIMELINE_IMPORT_ERROR = exc
+else:
+    TUMOR_TIMELINE_IMPORT_ERROR = None
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Cancer Type Prediction API",
@@ -310,6 +318,27 @@ class PredictionResponse(BaseModel):
     confidence: float = Field(
         ..., description="Prediction confidence (max probability)"
     )
+
+
+class TumorTimelineRequest(BaseModel):
+    """Schema for time-based tumor mask animation requests."""
+
+    effectiveness: float = Field(..., ge=0.0, le=1.0, description="Medicine effectiveness score in [0,1]")
+    mask_image: str = Field(..., min_length=32, description="Binary tumor mask as base64 data URL")
+    original_image: Optional[str] = Field(default=None, description="Original MRI image as base64 data URL")
+    steps: int = Field(default=8, ge=5, le=15, description="Number of time steps for progression frames")
+
+
+class TumorTimelineResponse(BaseModel):
+    """Response payload for animated tumor progression."""
+
+    effectiveness: float
+    frames: List[str]
+    message: str
+    risk_levels: List[str]
+    recovery_percentages: List[float]
+    tumor_area_percentages: List[float]
+    frame_interval_ms: int
 
 
 @app.get("/health")
@@ -608,6 +637,38 @@ async def batch_predict(data: dict):
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
 
 
+@app.post("/simulate-timeline", response_model=TumorTimelineResponse)
+async def simulate_timeline(payload: TumorTimelineRequest):
+    """
+    Generate time-based tumor progression frames from a binary tumor mask.
+
+    - effectiveness > 0.6: tumor shrinks
+    - effectiveness <= 0.6: tumor grows slightly
+    """
+    if tumor_timeline_simulator is None:
+        missing_dependency = getattr(TUMOR_TIMELINE_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Tumor timeline simulator is unavailable. "
+                f"Missing module: {missing_dependency}."
+            ),
+        )
+
+    try:
+        result = tumor_timeline_simulator.generate_animation(
+            mask_data_url=payload.mask_image,
+            effectiveness=payload.effectiveness,
+            steps=payload.steps,
+            original_image_data_url=payload.original_image,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Timeline simulation failed: {exc}") from exc
+
+
 @app.post("/analyze")
 async def analyze_tumor_response(
     file: UploadFile = File(...),
@@ -667,20 +728,42 @@ async def analyze_tumor_response(
         digital_twin_result = digital_twin_predictor.predict_image(temp_path)
         tumor_size = float(digital_twin_result.get("mask_coverage_pct", 0.0))
 
-        predicted_reduction, confidence = medicine_simulator.predict_reduction(
+        _, tumor_reduction = medicine_simulator.simulate_tumor(
+            tumor_size=tumor_size,
+            medicine=medicine_type,
+            dosage=dosage,
+            months=6.0,
+        )
+        recovery_months = {
+            "25%": round(medicine_simulator.recovery_time(tumor_size, medicine_type, dosage, 25.0), 4),
+            "50%": round(medicine_simulator.recovery_time(tumor_size, medicine_type, dosage, 50.0), 4),
+            "75%": round(medicine_simulator.recovery_time(tumor_size, medicine_type, dosage, 75.0), 4),
+        }
+        simulation = medicine_simulator.simulate_response(
             tumor_size=tumor_size,
             medicine_type=medicine_type,
             dosage=dosage,
         )
+        kinetics = simulation.get("kinetics", {})
 
         return {
+            "medicine": (medicine_type or "unknown").strip().lower(),
             "tumor_size": round(tumor_size, 4),
-            "predicted_reduction": round(float(predicted_reduction), 4),
-            "confidence": round(float(confidence), 4),
+            "predicted_reduction": round(float(tumor_reduction), 4),
+            "recovery_months": recovery_months,
+            # Backward-compatible aliases for existing frontend consumers.
+            "tumor_reduction": round(float(tumor_reduction), 4),
+            "confidence": round(float(kinetics.get("effectiveness", 0.0)), 4),
+            "complete_response_possible": bool(simulation.get("complete_response_possible", False)),
+            "max_projected_reduction": round(float(simulation.get("max_projected_reduction", 0.0)), 4),
+            "complete_response_note": simulation.get("complete_response_note"),
             "medicine_type": medicine_type,
             "dosage": float(dosage),
+            "kinetics": kinetics,
             "segmentation_confidence": digital_twin_result.get("segmentation_confidence"),
             "mask_area_ratio": digital_twin_result.get("mask_area_ratio"),
+            "source_image": digital_twin_result.get("source_image"),
+            "mask_image": digital_twin_result.get("mask_image"),
             "overlay_image": digital_twin_result.get("overlay_image"),
         }
     except HTTPException:

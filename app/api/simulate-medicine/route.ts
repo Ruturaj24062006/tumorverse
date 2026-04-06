@@ -49,6 +49,7 @@ async function requestRecommendation(payload: {
   pathway: string
   target: string
   tumor_size: number
+  dosage: number
   medicine: string
 }) {
   const response = await fetch(`${API_BASE_URL}/recommend`, {
@@ -70,9 +71,10 @@ export async function POST(req: Request) {
     const tumorTypeRaw = typeof body?.tumor_type === "string" ? body.tumor_type : ""
     const medicineRaw = typeof body?.medicine === "string" ? body.medicine : ""
     const tumorSize = Number(body?.tumor_size)
+    const dosage = Number(body?.dosage ?? 50)
 
-    if (!tumorTypeRaw || !medicineRaw || !Number.isFinite(tumorSize) || tumorSize <= 0) {
-      return NextResponse.json({ error: "Missing or invalid tumor_type, medicine, or tumor_size" }, { status: 400 })
+    if (!tumorTypeRaw || !medicineRaw || !Number.isFinite(tumorSize) || tumorSize <= 0 || !Number.isFinite(dosage) || dosage <= 0) {
+      return NextResponse.json({ error: "Missing or invalid tumor_type, medicine, tumor_size, or dosage" }, { status: 400 })
     }
 
     const cancerType = mapTumorToCancerCode(tumorTypeRaw)
@@ -85,6 +87,7 @@ export async function POST(req: Request) {
       pathway,
       target,
       tumor_size: tumorSize,
+      dosage,
       medicine: medicineRaw,
     })
 
@@ -96,6 +99,7 @@ export async function POST(req: Request) {
         pathway: "EGFR signaling",
         target: "EGFR",
         tumor_size: tumorSize,
+        dosage,
         medicine: medicineRaw,
       })
       recommendationResponse = retry.response
@@ -108,6 +112,8 @@ export async function POST(req: Request) {
     }
 
     const confidence = Number(recommendationData?.confidence || 0)
+    const tumorReduction = Number(recommendationData?.tumor_reduction || 0)
+    const recoveryMonths = recommendationData?.recovery_months || {}
     const effective = confidence >= 0.55
 
     return NextResponse.json({
@@ -115,13 +121,15 @@ export async function POST(req: Request) {
       best_drug: recommendationData?.best_drug,
       confidence,
       effectiveness: confidence,
+      tumor_reduction: tumorReduction,
+      recovery_months: recoveryMonths,
       top_3_drugs: Array.isArray(recommendationData?.top_3_drugs) ? recommendationData.top_3_drugs : [],
       recovery: recommendationData?.recovery || {},
       recovery_timeline: recommendationData?.recovery || {},
       effective,
       explanation: effective
-        ? "Model predicts favorable response for the selected medicine profile."
-        : "Model predicts low response likelihood for the selected medicine profile.",
+        ? "Rule-based simulation indicates favorable response for the selected medicine profile."
+        : "Rule-based simulation indicates low response likelihood for the selected medicine profile.",
       risk_message: effective
         ? "Predicted positive response. Continue monitoring progression milestones."
         : "Low predicted response. Consider top-ranked alternatives.",

@@ -1,52 +1,16 @@
-"""Medicine response simulation using a trained RandomForestRegressor."""
+"""Medicine-specific tumor shrink simulation using exponential kinetics."""
 
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
-from typing import Dict, Optional, Tuple
+import math
+from typing import Dict, Tuple
 
-import joblib
-import numpy as np
+from config.medicine_database import get_medicine_profile
 
 
 class MedicineSimulator:
-    """Loads medicine model and predicts tumor reduction from tumor size, medicine, and dosage."""
-
-    _MEDICINE_CODES: Dict[str, int] = {
-        "gefitinib": 0,
-        "cisplatin": 1,
-        "pembrolizumab": 2,
-        "trastuzumab": 3,
-        "imatinib": 4,
-        "paclitaxel": 5,
-        "tamoxifen": 6,
-        "oxaliplatin": 7,
-        "cetuximab": 8,
-        "temozolomide": 9,
-        "sorafenib": 10,
-        "lenvatinib": 11,
-        "nivolumab": 12,
-        "everolimus": 13,
-        "enzalutamide": 14,
-        "abiraterone": 15,
-        "docetaxel": 16,
-        "vemurafenib": 17,
-        "ipilimumab": 18,
-        "dabrafenib": 19,
-        "olaparib": 20,
-    }
-
-    def __init__(self, model_path: Optional[Path] = None) -> None:
-        backend_dir = Path(__file__).resolve().parent.parent
-        self.model_path = model_path or backend_dir / "model" / "medicine_model.pkl"
-        self.model = None
-        self.model_load_error: Optional[str] = None
-
-        try:
-            self.model = joblib.load(self.model_path)
-        except Exception as exc:
-            self.model_load_error = str(exc)
+    """Simulates medicine response from medicine kinetics and dosage over time."""
 
     @staticmethod
     def _stable_bucket_code(text: str, bucket_size: int = 100) -> int:
@@ -54,62 +18,120 @@ class MedicineSimulator:
         return int(digest[:8], 16) % bucket_size
 
     @classmethod
-    def encode_medicine(cls, medicine_type: str) -> int:
-        normalized = (medicine_type or "").strip().lower()
-        if not normalized:
-            return 0
-
-        if normalized in cls._MEDICINE_CODES:
-            return cls._MEDICINE_CODES[normalized]
-
-        # Keep unknown medicines deterministic without retraining artifacts.
-        return cls._stable_bucket_code(normalized)
+    def _resolve_medicine_kinetics(cls, medicine_type: str) -> Dict[str, float]:
+        """Resolve medicine kinetics from unified database.
+        
+        Uses the unified medicine database which ensures consistency
+        between recommendation and simulation modules.
+        """
+        return get_medicine_profile(medicine_type)
 
     @staticmethod
-    def _build_confidence(estimator_predictions: np.ndarray) -> float:
-        if estimator_predictions.size == 0:
+    def _normalize_dosage(dosage: float) -> float:
+        return max(0.1, min(3.0, float(dosage) / 50.0))
+
+    @staticmethod
+    def _tumor_burden_factor(tumor_size: float) -> float:
+        # Larger tumors are harder to control due to burden and heterogeneity.
+        return 1.0 + 0.35 * math.log1p(max(0.0, float(tumor_size)))
+
+    def simulate_tumor(self, tumor_size: float, medicine: str, dosage: float, months: float) -> Tuple[float, float]:
+        """Return simulated tumor size and percentage reduction at a given month horizon."""
+        initial_size = max(0.01, float(tumor_size))
+        time_months = max(0.0, float(months))
+        dosage_term = self._normalize_dosage(dosage)
+        profile = self._resolve_medicine_kinetics(medicine)
+
+        k = max(0.0001, float(profile["k"]))
+        effectiveness = max(0.01, min(1.0, float(profile["effectiveness"])))
+        dosage_sensitivity = max(0.1, float(profile["dosage_sensitivity"]))
+        burden_factor = self._tumor_burden_factor(initial_size)
+
+        # tumor_size(t) = initial_size * exp(-k * dosage * time)
+        effective_rate = (k * effectiveness * dosage_term * dosage_sensitivity) / burden_factor
+        new_size = initial_size * math.exp(-effective_rate * time_months)
+        reduction_pct = max(0.0, min(100.0, (1.0 - (new_size / initial_size)) * 100.0))
+        return new_size, reduction_pct
+
+    def recovery_time(self, tumor_size: float, medicine: str, dosage: float, target_reduction: float) -> float:
+        """Return months required to reach a target percentage reduction."""
+        target = max(0.0, min(99.0, float(target_reduction))) / 100.0
+        if target <= 0.0:
             return 0.0
 
-        std = float(np.std(estimator_predictions))
-        # Confidence in [0, 1], lower spread across trees means higher confidence.
-        return float(1.0 / (1.0 + std))
+        initial_size = max(0.01, float(tumor_size))
+        dosage_term = self._normalize_dosage(dosage)
+        profile = self._resolve_medicine_kinetics(medicine)
 
-    def _build_feature_vector(self, tumor_size: float, medicine_type: str, dosage: float) -> np.ndarray:
-        if self.model is None:
-            raise RuntimeError(
-                "Medicine model is not available. "
-                f"Load error: {self.model_load_error or 'unknown error'}"
-            )
+        k = max(0.0001, float(profile["k"]))
+        effectiveness = max(0.01, min(1.0, float(profile["effectiveness"])))
+        dosage_sensitivity = max(0.1, float(profile["dosage_sensitivity"]))
+        burden_factor = self._tumor_burden_factor(initial_size)
+        effective_rate = (k * effectiveness * dosage_term * dosage_sensitivity) / burden_factor
 
-        medicine_code = float(self.encode_medicine(medicine_type))
-        feature_lookup = {
-            "tumor_size": float(tumor_size),
-            "medicine": medicine_code,
-            "dosage": float(dosage),
+        if effective_rate <= 1e-9:
+            return 120.0
+
+        months = -math.log(1.0 - target) / effective_rate
+        return max(0.0, min(120.0, months))
+
+    @staticmethod
+    def _time_for_reduction(target_fraction: float, rate: float) -> float:
+        if rate <= 1e-9:
+            return 120.0
+        return max(0.0, min(120.0, -math.log(1.0 - target_fraction) / rate))
+
+    def simulate_response(self, tumor_size: float, medicine_type: str, dosage: float) -> Dict[str, object]:
+        profile = self._resolve_medicine_kinetics(medicine_type)
+        horizon_months = 6.0
+        final_size, tumor_reduction = self.simulate_tumor(
+            tumor_size=tumor_size,
+            medicine=medicine_type,
+            dosage=dosage,
+            months=horizon_months,
+        )
+
+        long_horizon_months = 120.0
+        long_horizon_size, long_horizon_reduction = self.simulate_tumor(
+            tumor_size=tumor_size,
+            medicine=medicine_type,
+            dosage=dosage,
+            months=long_horizon_months,
+        )
+        complete_response_possible = float(long_horizon_reduction) >= 99.9
+
+        recovery_months = {
+            "25%": round(self.recovery_time(tumor_size, medicine_type, dosage, 25.0), 4),
+            "50%": round(self.recovery_time(tumor_size, medicine_type, dosage, 50.0), 4),
+            "75%": round(self.recovery_time(tumor_size, medicine_type, dosage, 75.0), 4),
         }
 
-        feature_names = getattr(self.model, "feature_names_in_", None)
-        if feature_names is not None and len(feature_names) > 0:
-            ordered = [feature_lookup.get(str(name), 0.0) for name in feature_names]
-            return np.array([ordered], dtype=np.float32)
-
-        return np.array([[feature_lookup["tumor_size"], feature_lookup["medicine"], feature_lookup["dosage"]]], dtype=np.float32)
+        return {
+            "medicine": (medicine_type or "unknown").strip().lower(),
+            "tumor_reduction": round(tumor_reduction, 4),
+            "recovery_months": recovery_months,
+            "projected_tumor_size": round(float(final_size), 4),
+            "max_projected_reduction": round(float(long_horizon_reduction), 4),
+            "complete_response_possible": complete_response_possible,
+            "complete_response_note": (
+                "Near-complete response is achievable within the long-horizon simulation window."
+                if complete_response_possible
+                else "Literal 100% reduction is not reached within the model horizon; response remains asymptotic."
+            ),
+            "kinetics": {
+                "k": round(float(profile["k"]), 5),
+                "effectiveness": round(float(profile["effectiveness"]), 4),
+                "dosage_sensitivity": round(float(profile["dosage_sensitivity"]), 4),
+            },
+            "model": "rule_based_exponential_decay",
+            "equation": "tumor_size(t) = initial_size * exp(-k * effectiveness * dosage * sensitivity * time / burden)",
+        }
 
     def predict_reduction(self, tumor_size: float, medicine_type: str, dosage: float) -> Tuple[float, float]:
-        if self.model is None:
-            raise RuntimeError(
-                "Medicine model is not available. "
-                f"Load error: {self.model_load_error or 'unknown error'}"
-            )
-
-        features = self._build_feature_vector(tumor_size=tumor_size, medicine_type=medicine_type, dosage=dosage)
-        prediction = float(self.model.predict(features)[0])
-
-        estimators = getattr(self.model, "estimators_", [])
-        tree_predictions = np.array([float(est.predict(features)[0]) for est in estimators], dtype=np.float32)
-        confidence = self._build_confidence(tree_predictions)
-
-        return prediction, confidence
+        response = self.simulate_response(tumor_size=tumor_size, medicine_type=medicine_type, dosage=dosage)
+        tumor_reduction = float(response["tumor_reduction"])
+        confidence = float(response["kinetics"]["effectiveness"])
+        return tumor_reduction, confidence
 
 
 medicine_simulator = MedicineSimulator()

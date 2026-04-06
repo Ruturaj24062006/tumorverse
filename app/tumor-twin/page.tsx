@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState, useEffect } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Badge } from "@/components/ui/badge"
@@ -25,12 +25,22 @@ import {
   RotateCcw,
   RefreshCw,
   Dna,
+  Play,
+  Pause,
 } from "lucide-react"
 import { motion } from "framer-motion"
 import { ConfidenceVisualizer } from "@/components/ui/confidence-visualizer"
 import { MedicineTimeline } from "@/components/ui/medicine-timeline"
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { loadLatestDigitalTwin } from "@/lib/digitalTwinModule"
 import type { StoredDigitalTwinAnalysis as DigitalTwinAnalysis } from "@/lib/digitalTwinModule"
+import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
+
+const timelineChartConfig = {
+  tumorArea: { label: "Tumor Area %", color: "#FF3B5C" },
+  recovery: { label: "Recovery %", color: "#00FF9C" },
+  riskScore: { label: "Risk Score", color: "#00E5FF" },
+}
 
 interface Medicine {
   name: string
@@ -50,6 +60,16 @@ interface SimulationResponse {
   effective: boolean
   explanation?: string
   risk_message?: string
+}
+
+interface TimelineSimulationResponse {
+  effectiveness: number
+  frames: string[]
+  message: string
+  risk_levels: string[]
+  recovery_percentages: number[]
+  tumor_area_percentages: number[]
+  frame_interval_ms: number
 }
 
 function parseMonths(value?: string): number {
@@ -76,6 +96,10 @@ function DigitalTwinContent() {
   const [twinBuildProgress, setTwinBuildProgress] = useState(0)
   const [twinReplayNonce, setTwinReplayNonce] = useState(0)
   const [viewMode, setViewMode] = useState<"clinical" | "3d">("clinical")
+  const [timelineSimulation, setTimelineSimulation] = useState<TimelineSimulationResponse | null>(null)
+  const [timelineFrameIndex, setTimelineFrameIndex] = useState(0)
+  const [timelinePlaying, setTimelinePlaying] = useState(true)
+  const [timelineSpeedMs, setTimelineSpeedMs] = useState(500)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -138,6 +162,16 @@ function DigitalTwinContent() {
   }, [])
 
   useEffect(() => {
+    if (!timelineSimulation?.frames?.length || !timelinePlaying) return
+
+    const ticker = window.setInterval(() => {
+      setTimelineFrameIndex((prev) => (prev + 1) % timelineSimulation.frames.length)
+    }, Math.max(120, timelineSpeedMs))
+
+    return () => window.clearInterval(ticker)
+  }, [timelineSimulation, timelinePlaying, timelineSpeedMs])
+
+  useEffect(() => {
     const currentImageName = searchParams.get("imageName") || ""
     const twinData = loadLatestDigitalTwin(currentImageName)
     if (twinData) {
@@ -180,6 +214,9 @@ function DigitalTwinContent() {
     setMedicineEffect("none")
     setSimulationResult(null)
     setRecoveryProgress(0)
+    setTimelineSimulation(null)
+    setTimelineFrameIndex(0)
+    setTimelinePlaying(true)
 
     try {
       const res = await fetch("/api/simulate-medicine", {
@@ -199,6 +236,34 @@ function DigitalTwinContent() {
         const effective = data.effective ?? modelScore >= 0.55
         setMedicineEffect(effective ? "effective" : "ineffective")
         setRecoveryProgress(0)
+
+        if (digitalTwinAnalysis?.mask_image) {
+          try {
+            const timelineRes = await fetch("/api/simulate-timeline", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                effectiveness: Math.max(0, Math.min(1, modelScore)),
+                steps: 8,
+                mask_image: digitalTwinAnalysis.mask_image,
+                original_image: digitalTwinAnalysis.source_image || digitalTwinAnalysis.overlay_image,
+              }),
+            })
+
+            if (timelineRes.ok) {
+              const timeline = (await timelineRes.json()) as TimelineSimulationResponse
+              setTimelineSimulation(timeline)
+              setTimelineFrameIndex(0)
+              setTimelinePlaying(true)
+              setTimelineSpeedMs(Number(timeline.frame_interval_ms) || 500)
+            }
+          } catch (timelineError) {
+            console.error("Timeline simulation failed:", timelineError)
+            setTimelineSimulation(null)
+          }
+        } else {
+          setTimelineSimulation(null)
+        }
 
         if (typeof window !== "undefined") {
           const existing = JSON.parse(localStorage.getItem("predictionHistory") || "[]")
@@ -230,6 +295,9 @@ function DigitalTwinContent() {
     setActiveMedicine(null)
     setSimulationResult(null)
     setRecoveryProgress(0)
+    setTimelineSimulation(null)
+    setTimelineFrameIndex(0)
+    setTimelinePlaying(true)
     setTime(0)
     setZoomLevel(8)
     setRotateEnabled(true)
@@ -261,6 +329,24 @@ function DigitalTwinContent() {
         y: (digitalTwinAnalysis.bounding_box.y_min + digitalTwinAnalysis.bounding_box.y_max) / 2,
       }
     : null
+  const activeTimelineFrame = timelineSimulation?.frames?.[timelineFrameIndex] || null
+  const timelineChartData = useMemo(() => {
+    if (!timelineSimulation) return []
+
+    const toRiskScore = (risk: string) => {
+      if (risk === "high") return 100
+      if (risk === "moderate") return 60
+      return 25
+    }
+
+    return timelineSimulation.tumor_area_percentages.map((area, idx) => ({
+      step: `T${idx + 1}`,
+      tumorArea: Number(area.toFixed(2)),
+      recovery: Number((timelineSimulation.recovery_percentages[idx] || 0).toFixed(2)),
+      riskScore: toRiskScore(timelineSimulation.risk_levels[idx] || "moderate"),
+      riskLabel: timelineSimulation.risk_levels[idx] || "moderate",
+    }))
+  }, [timelineSimulation])
 
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: "#0A1628" }}>
@@ -592,6 +678,127 @@ function DigitalTwinContent() {
                               />
                             )}
                 </div>
+              </div>
+            )}
+
+            {timelineSimulation && activeTimelineFrame && (
+              <div className="glass-panel rounded-2xl p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">
+                    Tumor Time Simulation
+                  </h3>
+                  <Badge
+                    className="border-0"
+                    style={{
+                      backgroundColor: timelineSimulation.message.toLowerCase().includes("shrinking")
+                        ? "rgba(0,255,156,0.2)"
+                        : "rgba(255,59,92,0.2)",
+                      color: timelineSimulation.message.toLowerCase().includes("shrinking") ? "#00FF9C" : "#FF3B5C",
+                    }}
+                  >
+                    {timelineSimulation.message}
+                  </Badge>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0A1628]/70">
+                  <img
+                    src={activeTimelineFrame}
+                    alt="Tumor progression animation frame"
+                    className="h-56 w-full object-cover md:h-72"
+                  />
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setTimelinePlaying((prev) => !prev)}
+                    className="bg-[#00E5FF] text-[#051425] hover:bg-[#00E5FF]/90"
+                  >
+                    {timelinePlaying ? <Pause className="mr-2 h-4 w-4" /> : <Play className="mr-2 h-4 w-4" />}
+                    {timelinePlaying ? "Pause" : "Play"}
+                  </Button>
+
+                  <select
+                    value={timelineSpeedMs}
+                    onChange={(event) => setTimelineSpeedMs(Number(event.target.value))}
+                    className="rounded-md border border-white/20 bg-[#0A1628] px-2 py-1 text-sm text-[#E8EDF2]"
+                  >
+                    <option value={800}>0.6x Speed</option>
+                    <option value={500}>1x Speed</option>
+                    <option value={320}>1.6x Speed</option>
+                    <option value={220}>2.2x Speed</option>
+                  </select>
+
+                  <span className="text-xs text-[#8899AA]">
+                    Frame {timelineFrameIndex + 1}/{timelineSimulation.frames.length}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {timelineSimulation.tumor_area_percentages.map((area, idx) => {
+                    const risk = timelineSimulation.risk_levels[idx] || "moderate"
+                    const recovery = timelineSimulation.recovery_percentages[idx] || 0
+                    return (
+                      <div key={`timeline-step-${idx}`} className="rounded-lg border border-white/10 bg-[#0A1628]/60 p-2">
+                        <p className="text-[10px] uppercase tracking-wider text-[#8899AA]">T{idx + 1}</p>
+                        <p className="text-xs text-[#E8EDF2]">Area {area.toFixed(1)}%</p>
+                        <p className="text-xs capitalize text-[#00E5FF]">Risk {risk}</p>
+                        <p className="text-xs text-[#00FF9C]">Recovery {recovery.toFixed(1)}%</p>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {timelineChartData.length > 1 && (
+                  <div className="mt-4 rounded-xl border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#8899AA]">
+                      Tumor Response Timeline
+                    </p>
+                    <ChartContainer config={timelineChartConfig} className="h-56 w-full">
+                      <LineChart data={timelineChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+                        <XAxis dataKey="step" tick={{ fill: "#8899AA", fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fill: "#8899AA", fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <ChartTooltip
+                          cursor={{ stroke: "rgba(255,255,255,0.25)", strokeWidth: 1 }}
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value, name, item) => {
+                                if (name === "riskScore") {
+                                  return (
+                                    <>
+                                      <span className="text-muted-foreground">Risk Level</span>
+                                      <span className="text-foreground font-mono font-medium tabular-nums">
+                                        {String(item?.payload?.riskLabel || "moderate")}
+                                      </span>
+                                    </>
+                                  )
+                                }
+                                return (
+                                  <>
+                                    <span className="text-muted-foreground">{String(name)}</span>
+                                    <span className="text-foreground font-mono font-medium tabular-nums">
+                                      {Number(value).toFixed(1)}%
+                                    </span>
+                                  </>
+                                )
+                              }}
+                            />
+                          }
+                        />
+                        <ReferenceLine
+                          x={timelineChartData[Math.min(timelineFrameIndex, timelineChartData.length - 1)]?.step}
+                          stroke="rgba(0,229,255,0.5)"
+                          strokeDasharray="4 4"
+                        />
+                        <Line type="monotone" dataKey="tumorArea" stroke="var(--color-tumorArea)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="recovery" stroke="var(--color-recovery)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="riskScore" stroke="var(--color-riskScore)" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ChartContainer>
+                  </div>
+                )}
               </div>
             )}
           </div>
