@@ -146,6 +146,7 @@ class TumorTimelineSimulator:
         frames: List[str] = []
         risk_levels: List[str] = []
         recovery_percentages: List[float] = []
+        progression_percentages: List[float] = []
         tumor_area_percentages: List[float] = []
 
         for mask in masks:
@@ -155,6 +156,9 @@ class TumorTimelineSimulator:
 
             recovery = max(0.0, min(100.0, (1.0 - (area_ratio / initial_area)) * 100.0))
             recovery_percentages.append(round(recovery, 3))
+
+            progression = max(0.0, min(100.0, ((area_ratio / initial_area) - 1.0) * 100.0))
+            progression_percentages.append(round(progression, 3))
 
             rendered = self._overlay(base_image, mask)
             frames.append(self._encode_data_url(rendered))
@@ -166,6 +170,7 @@ class TumorTimelineSimulator:
             "message": message,
             "risk_levels": risk_levels,
             "recovery_percentages": recovery_percentages,
+            "progression_percentages": progression_percentages,
             "tumor_area_percentages": tumor_area_percentages,
             "frame_interval_ms": 500,
         }

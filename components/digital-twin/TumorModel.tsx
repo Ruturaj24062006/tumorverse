@@ -39,7 +39,10 @@ export function TumorModel({
   const particlesRef = useRef<THREE.InstancedMesh>(null)
   const elapsedRef = useRef(0)
 
-  const baseScale = (aggressiveness === "high" ? 1.24 : aggressiveness === "moderate" ? 1.04 : 0.86) * (0.88 + tumorIntensity * 0.24)
+  const baseScale =
+    (aggressiveness === "high" ? 1.24 : aggressiveness === "moderate" ? 1.04 : 0.86) *
+    (0.88 + tumorIntensity * 0.24) *
+    1.0
   const baseSpeed = aggressiveness === "high" ? 1.25 : aggressiveness === "moderate" ? 0.9 : 0.6
   const focusX = lesionFocus ? (lesionFocus.x - 0.5) * 1.4 : 0
   const focusY = lesionFocus ? (0.5 - lesionFocus.y) * 1.4 : 0

@@ -77,6 +77,7 @@ export default function PredictionPage() {
     "Generating digital tumor twin",
     "Preparing medicine recommendations"
   ]
+  const REQUEST_TIMEOUT_MS = 30000
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault()

@@ -68,6 +68,7 @@ interface TimelineSimulationResponse {
   message: string
   risk_levels: string[]
   recovery_percentages: number[]
+  progression_percentages: number[]
   tumor_area_percentages: number[]
   frame_interval_ms: number
 }
@@ -83,7 +84,7 @@ function DigitalTwinContent() {
 
   const [showGenes, setShowGenes] = useState(true)
   const [rotateEnabled, setRotateEnabled] = useState(true)
-  const [zoomLevel, setZoomLevel] = useState(8)
+  const [zoomLevel, setZoomLevel] = useState(7.4)
   const [selectedMedicine, setSelectedMedicine] = useState("")
   const [activeMedicine, setActiveMedicine] = useState<string | null>(null)
   const [medicineEffect, setMedicineEffect] = useState<"none" | "effective" | "ineffective">("none")
@@ -299,7 +300,7 @@ function DigitalTwinContent() {
     setTimelineFrameIndex(0)
     setTimelinePlaying(true)
     setTime(0)
-    setZoomLevel(8)
+    setZoomLevel(7.4)
     setRotateEnabled(true)
   }
 
@@ -737,14 +738,20 @@ function DigitalTwinContent() {
 
                 <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                   {timelineSimulation.tumor_area_percentages.map((area, idx) => {
+                    const isShrinking = timelineSimulation.message.toLowerCase().includes("shrinking")
                     const risk = timelineSimulation.risk_levels[idx] || "moderate"
                     const recovery = timelineSimulation.recovery_percentages[idx] || 0
+                    const progression = timelineSimulation.progression_percentages?.[idx] || 0
                     return (
                       <div key={`timeline-step-${idx}`} className="rounded-lg border border-white/10 bg-[#0A1628]/60 p-2">
                         <p className="text-[10px] uppercase tracking-wider text-[#8899AA]">T{idx + 1}</p>
                         <p className="text-xs text-[#E8EDF2]">Area {area.toFixed(1)}%</p>
                         <p className="text-xs capitalize text-[#00E5FF]">Risk {risk}</p>
-                        <p className="text-xs text-[#00FF9C]">Recovery {recovery.toFixed(1)}%</p>
+                        {isShrinking ? (
+                          <p className="text-xs text-[#00FF9C]">Recovery {recovery.toFixed(1)}%</p>
+                        ) : (
+                          <p className="text-xs text-[#FF9F43]">Growth +{progression.toFixed(1)}%</p>
+                        )}
                       </div>
                     )
                   })}

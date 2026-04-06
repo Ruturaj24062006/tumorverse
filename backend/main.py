@@ -337,6 +337,7 @@ class TumorTimelineResponse(BaseModel):
     message: str
     risk_levels: List[str]
     recovery_percentages: List[float]
+    progression_percentages: List[float]
     tumor_area_percentages: List[float]
     frame_interval_ms: int
 

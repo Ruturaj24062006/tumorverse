@@ -86,12 +86,12 @@ export function Scene({
                         scene.background = new THREE.Color("#060e1a")
                     }}
                 >
-                    <PerspectiveCamera makeDefault position={[0, 0, zoomLevel]} fov={45} />
+                    <PerspectiveCamera makeDefault position={[0, 0, zoomLevel]} fov={46} />
                     <OrbitControls
                         enablePan={false}
                         enableZoom
-                        minDistance={2}
-                        maxDistance={10}
+                        minDistance={2.8}
+                        maxDistance={9}
                         autoRotate={rotateEnabled}
                         autoRotateSpeed={0.5}
                     />
