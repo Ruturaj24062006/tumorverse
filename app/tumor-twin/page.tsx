@@ -6,10 +6,18 @@ import { Navbar } from "@/components/navbar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { Slider } from "@/components/ui/slider"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 import { Scene } from "@/components/digital-twin/Scene"
+import dynamic from "next/dynamic"
+const MedicalVolumeViewer = dynamic(() => import("@/components/vtk/MedicalVolumeViewer"), {
+  ssr: false,
+  loading: () => <div className="flex items-center justify-center text-[#00E5FF]">Loading viewer...</div>,
+})
 import { ClinicalTwinView } from "@/components/digital-twin/ClinicalTwinView"
-import { ControlPanel } from "@/components/digital-twin/ControlPanel"
 import { MedicineAnalysisPanel } from "@/components/digital-twin/MedicineAnalysisPanel"
+import UploadMesh from "@/components/digital-twin/UploadMesh"
 import Link from "next/link"
 import {
   Activity,
@@ -40,6 +48,7 @@ const timelineChartConfig = {
   tumorArea: { label: "Tumor Area %", color: "#FF3B5C" },
   recovery: { label: "Recovery %", color: "#00FF9C" },
   riskScore: { label: "Risk Score", color: "#00E5FF" },
+  responseReduction: { label: "Response %", color: "#8A2BE2" },
 }
 
 interface Medicine {
@@ -54,22 +63,70 @@ interface SimulationResponse {
   best_drug?: string
   confidence: number
   effectiveness: number
+  effectiveness_ratio?: number
+  treatment_score?: number
+  status?: "shrinking" | "growing" | "stable"
   recovery: Record<string, string>
-  recovery_timeline?: Record<string, string>
   top_3_drugs?: string[]
   effective: boolean
   explanation?: string
   risk_message?: string
+  tumor_reduction?: number
+  tumor_change_pct?: number
+  growth_rate?: number
+  drug_effect?: number
+  projected_tumor_size?: number
+  recovery_score?: number
+  recovery_probability?: number
+  recovery_timeline?: Record<string, string>
+  stabilization_time?: number | null
+  treatment_status?: string
+  risk_level?: string
+  response_band?: string
+  response_curve?: Array<{
+    month: number
+    response_fraction: number
+    tumor_fraction: number
+    reduction_pct: number
+    slope: number
+  }>
+  timeline_curve?: Array<{
+    month: number
+    response_fraction: number
+    tumor_fraction: number
+    recovery_probability: number
+    reduction_pct: number
+  }>
+  stage_probabilities?: Record<string, number>
+  stage_likelihoods?: Record<string, string>
+  confidence_interval?: Record<string, unknown>
+  relapse_probability?: number
+  resistance_estimation?: number
+  months_to_stability?: number | null
+}
+
+interface SimulationMesh {
+  vertices: number[][]
+  faces: number[][]
+  densityMap?: number[]
+  opacityMap?: number[]
+  tissueRegions?: number[]
 }
 
 interface TimelineSimulationResponse {
   effectiveness: number
+  status: "shrinking" | "growing" | "stable" | string
   frames: string[]
   message: string
   risk_levels: string[]
   recovery_percentages: number[]
   progression_percentages: number[]
   tumor_area_percentages: number[]
+  mesh: SimulationMesh
+  initial_area_pct?: number
+  final_area_pct?: number
+  growth_rate?: number
+  drug_effect?: number
   frame_interval_ms: number
 }
 
@@ -201,8 +258,10 @@ function DigitalTwinContent() {
   let recommended: Medicine[] = []
   let notRecommended: Medicine[] = []
   try {
-    recommended = JSON.parse(searchParams.get("medsRecommended") || "[]")
-    notRecommended = JSON.parse(searchParams.get("medsNotRecommended") || "[]")
+    const recommendedRaw = searchParams.get("medsRecommended") || searchParams.get("meds_recommended") || "[]"
+    const notRecommendedRaw = searchParams.get("medsNotRecommended") || searchParams.get("meds_not_recommended") || "[]"
+    recommended = JSON.parse(recommendedRaw)
+    notRecommended = JSON.parse(notRecommendedRaw)
   } catch {
     console.error("Failed to parse medicines from URL")
   }
@@ -227,20 +286,33 @@ function DigitalTwinContent() {
           tumor_type: cancerType,
           medicine: selectedMedicine,
           tumor_size: Math.max(0.1, digitalTwinAnalysis?.mask_coverage_pct || tumorIntensity * 100),
+          aggressiveness,
         }),
       })
 
       if (res.ok) {
         const data = (await res.json()) as SimulationResponse
         setSimulationResult(data)
-        const modelScore = Number.isFinite(data.confidence) ? data.confidence : data.effectiveness
-        const effective = data.effective ?? modelScore >= 0.55
+        const modelScore = Number.isFinite(data.effectiveness_ratio)
+          ? Number(data.effectiveness_ratio)
+          : Number.isFinite(data.treatment_score)
+            ? Number(data.treatment_score) / 100
+            : Number.isFinite(data.effectiveness)
+              ? data.effectiveness
+              : data.confidence
+        const effective =
+          Number(data.treatment_score || 0) >= 55 ||
+          data.status === "shrinking" ||
+          data.effective ||
+          ["Excellent Response", "Responding to Treatment", "Partial Regression", "Stable Disease"].includes(
+            data.treatment_status || "",
+          )
         setMedicineEffect(effective ? "effective" : "ineffective")
         setRecoveryProgress(0)
 
         if (digitalTwinAnalysis?.mask_image) {
           try {
-            const timelineRes = await fetch("/api/simulate-timeline", {
+            const timelineRes = await fetch("/api/simulate", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -257,6 +329,7 @@ function DigitalTwinContent() {
               setTimelineFrameIndex(0)
               setTimelinePlaying(true)
               setTimelineSpeedMs(Number(timeline.frame_interval_ms) || 500)
+              setMedicineEffect(Number(data.treatment_score || 0) >= 55 || timeline.status === "shrinking" ? "effective" : "ineffective")
             }
           } catch (timelineError) {
             console.error("Timeline simulation failed:", timelineError)
@@ -304,6 +377,29 @@ function DigitalTwinContent() {
     setRotateEnabled(true)
   }
 
+  const handleMeshLoaded = (mesh: SimulationMesh) => {
+    // attach mesh into timelineSimulation so Scene/TumorModel can render it
+    setTimelineSimulation((prev) => {
+      const base: TimelineSimulationResponse | null = prev
+        ? { ...prev }
+        : {
+            effectiveness: 0,
+            status: "stable",
+            frames: [],
+            message: "Uploaded mesh",
+            risk_levels: [],
+            recovery_percentages: [],
+            progression_percentages: [],
+            tumor_area_percentages: [],
+            mesh: mesh,
+            frame_interval_ms: 500,
+          }
+      base.mesh = mesh
+      return base
+    })
+    setViewMode("3d")
+  }
+
   const handleRepeatTwinCreation = () => {
     setResetSceneTrigger((prev) => prev + 1)
     setTwinReplayNonce((prev) => prev + 1)
@@ -317,12 +413,14 @@ function DigitalTwinContent() {
   }
 
   const recoveryTimeline = simulationResult?.recovery || simulationResult?.recovery_timeline || {}
+  const stageTimeline = simulationResult?.recovery_timeline || recoveryTimeline
 
   const modelEffectiveness = simulationResult
     ? Number.isFinite(simulationResult.confidence)
       ? simulationResult.confidence
       : simulationResult.effectiveness
     : 0
+  const treatmentScore = simulationResult?.treatment_score ?? Math.round(modelEffectiveness * 100)
   const effectivenessPct = Math.round(modelEffectiveness * 100)
   const lesionFocus = digitalTwinAnalysis?.bounding_box
     ? {
@@ -348,6 +446,21 @@ function DigitalTwinContent() {
       riskLabel: timelineSimulation.risk_levels[idx] || "moderate",
     }))
   }, [timelineSimulation])
+
+  const responseCurveData = useMemo(() => {
+    const source = simulationResult?.timeline_curve?.length ? simulationResult.timeline_curve : simulationResult?.response_curve
+    if (!source?.length) return []
+
+    return source.map((point) => ({
+      month: point.month,
+      reductionPct: Number(point.reduction_pct.toFixed(2)),
+      tumorFraction: Number((point.tumor_fraction * 100).toFixed(2)),
+      responseFraction: Number((point.response_fraction * 100).toFixed(2)),
+      recoveryProbability: Number(
+        ("recovery_probability" in point ? point.recovery_probability : 0).toFixed(2),
+      ),
+    }))
+  }, [simulationResult])
 
   return (
     <div className="flex min-h-screen flex-col" style={{ backgroundColor: "#0A1628" }}>
@@ -392,6 +505,7 @@ function DigitalTwinContent() {
               <Badge className="rounded-md border-0 bg-[#00E5FF]/10 px-2 py-0.5 text-xs font-semibold text-[#00E5FF]">
                 Prediction Conf. {(confidence * 100).toFixed(0)}%
                           <div className="w-full max-w-xs">
+                treatmentScore={treatmentScore}
                             <ConfidenceVisualizer confidence={confidence} label="Confidence Level" />
                           </div>
               </Badge>
@@ -456,11 +570,81 @@ function DigitalTwinContent() {
         )}
 
         <motion.div
-          className="grid min-h-160 gap-6 lg:h-[calc(100vh-150px)] lg:grid-cols-5 xl:grid-cols-5"
+          className="grid min-h-160 gap-6 lg:h-[calc(100vh-150px)] lg:grid-cols-6 xl:grid-cols-6"
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.1 }}
         >
+          {/* Left Control Panel */}
+          <div className="hidden lg:flex flex-col gap-4 lg:col-span-1">
+            <div className="glass-panel flex flex-col gap-3 rounded-2xl p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[#E8EDF2]">Tumor Controls</h3>
+              
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="show-genes-side"
+                    checked={showGenes}
+                    onCheckedChange={setShowGenes}
+                    className="data-[state=checked]:bg-[#00E5FF]"
+                  />
+                  <Label htmlFor="show-genes-side" className="text-xs cursor-pointer text-[#8899AA] hover:text-[#E8EDF2]">
+                    <Dna className="h-3.5 w-3.5 inline mr-1 text-[#00E5FF]" /> Genes
+                  </Label>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRotateEnabled(!rotateEnabled)}
+                  className="justify-start text-xs rounded-lg border-[#8899AA]/30 text-[#8899AA] hover:bg-[#8899AA]/10 hover:text-[#E8EDF2] h-8"
+                >
+                  <Activity className="mr-1.5 h-3 w-3" /> {rotateEnabled ? "Pause" : "Rotate"}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setZoomLevel((prev) => Math.max(3, prev - 0.8))}
+                  className="justify-start text-xs rounded-lg border-[#8899AA]/30 text-[#8899AA] hover:bg-[#8899AA]/10 hover:text-[#E8EDF2] h-8"
+                >
+                  <ZoomIn className="mr-1.5 h-3 w-3" /> Zoom In
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setZoomLevel((prev) => Math.min(10, prev + 0.8))}
+                  className="justify-start text-xs rounded-lg border-[#8899AA]/30 text-[#8899AA] hover:bg-[#8899AA]/10 hover:text-[#E8EDF2] h-8"
+                >
+                  <ZoomOut className="mr-1.5 h-3 w-3" /> Zoom Out
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleResetView}
+                  className="justify-start text-xs rounded-lg border-[#8899AA]/30 text-[#8899AA] hover:bg-[#8899AA]/10 hover:text-[#E8EDF2] h-8"
+                >
+                  <RotateCcw className="mr-1.5 h-3 w-3" /> Reset View
+                </Button>
+              </div>
+
+              <div className="border-t border-white/10 pt-3">
+                <p className="text-[10px] text-[#8899AA] mb-2 uppercase tracking-wider">Recovery Timeline</p>
+                <Slider
+                  value={[recoveryProgress]}
+                  onValueChange={(values) => setRecoveryProgress(values[0])}
+                  min={0}
+                  max={100}
+                  step={1}
+                  className="w-full"
+                />
+                <p className="text-[10px] text-[#00E5FF] mt-1 font-semibold">{Math.round(recoveryProgress)}%</p>
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-col gap-4 lg:col-span-3 xl:col-span-3">
             <div className="glass-panel relative flex-1 overflow-hidden rounded-2xl neon-border">
               <div className="absolute left-4 top-4 z-30 flex gap-2">
@@ -503,26 +687,13 @@ function DigitalTwinContent() {
               )}
 
               {viewMode === "3d" ? (
-                <Scene
-                  key={resetSceneTrigger}
-                  aggressiveness={aggressiveness}
-                  medicineEffect={medicineEffect}
-                  showGenes={showGenes}
-                  time={time}
-                  rotateEnabled={rotateEnabled}
-                  zoomLevel={zoomLevel}
-                  recoveryProgress={recoveryProgress}
-                  tumorIntensity={tumorIntensity}
-                  lesionCoverage={digitalTwinAnalysis?.mask_area_ratio}
-                  lesionConfidence={digitalTwinAnalysis?.segmentation_confidence}
-                  lesionFocus={lesionFocus}
-                  buildProgress={twinBuildProgress}
-                />
+                <MedicalVolumeViewer />
               ) : (
                 <ClinicalTwinView
                   aggressiveness={aggressiveness}
                   medicineEffect={medicineEffect}
                   recoveryProgress={recoveryProgress}
+                  treatmentScore={treatmentScore}
                   time={time}
                   tumorIntensity={tumorIntensity}
                   lesionCoverage={digitalTwinAnalysis?.mask_area_ratio}
@@ -593,6 +764,9 @@ function DigitalTwinContent() {
                 >
                   <RotateCcw className="h-4 w-4" />
                 </Button>
+                <div className="mt-2">
+                  <UploadMesh onMesh={(m) => handleMeshLoaded(m as any)} />
+                </div>
               </div>
               )}
 
@@ -608,22 +782,9 @@ function DigitalTwinContent() {
                 </div>
               </div>
               )}
-            </div>
 
-            <ControlPanel
-              showGenes={showGenes}
-              setShowGenes={setShowGenes}
-              rotateEnabled={rotateEnabled}
-              setRotateEnabled={setRotateEnabled}
-              onZoomIn={() => setZoomLevel((prev) => Math.max(3, prev - 0.8))}
-              onZoomOut={() => setZoomLevel((prev) => Math.min(10, prev + 0.8))}
-              onTestMedicine={handleSimulateDrug}
-              canTestMedicine={!!selectedMedicine.trim()}
-              isTesting={simulating}
-              recoveryProgress={recoveryProgress}
-              setRecoveryProgress={setRecoveryProgress}
-              onResetView={handleResetView}
-            />
+              {/* Progression timeline removed as requested */}
+            </div>
 
             {digitalTwinAnalysis?.available && (
               <div className="glass-panel rounded-2xl p-4">
@@ -659,26 +820,128 @@ function DigitalTwinContent() {
 
             {simulationResult && (
               <div className="glass-panel rounded-2xl p-4">
-                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">Expected Tumor Recovery</h3>
-                <div className="space-y-3">
-                  {[25, 50, 75].map((value) => (
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">Expected Tumor Recovery</h3>
+                  <Badge
+                    className="border-0 capitalize"
+                    style={{
+                      backgroundColor: simulationResult.risk_level === "critical" || simulationResult.treatment_status === "Treatment Ineffective"
+                        ? "rgba(255,59,92,0.2)"
+                        : simulationResult.risk_level === "high"
+                          ? "rgba(255,159,67,0.2)"
+                          : "rgba(0,255,156,0.2)",
+                      color: simulationResult.risk_level === "critical" || simulationResult.treatment_status === "Treatment Ineffective"
+                        ? "#FF3B5C"
+                        : simulationResult.risk_level === "high"
+                          ? "#FF9F43"
+                          : "#00FF9C",
+                    }}
+                  >
+                    {simulationResult.treatment_status || (medicineEffect === "effective" ? "Responding to Treatment" : "Poor Response")}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {[
+                    { label: "25%", value: stageTimeline["25%"] || recoveryTimeline["25%"] || "Not achieved" },
+                    { label: "50%", value: stageTimeline["50%"] || recoveryTimeline["50%"] || "Not achieved" },
+                    { label: "75%", value: stageTimeline["75%"] || recoveryTimeline["75%"] || "Not achieved" },
+                    { label: "Stabilization", value: stageTimeline.stabilization || recoveryTimeline.stabilization || "Not achieved" },
+                  ].map((stage) => (
+                    <div key={stage.label} className="rounded-lg border border-white/10 bg-[#0A1628]/60 p-3">
+                      <p className="text-[10px] uppercase tracking-wider text-[#8899AA]">{stage.label} improvement</p>
+                      <p className="mt-1 text-sm font-semibold text-[#00E5FF]">{stage.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[#8899AA]">Recovery Likelihood</p>
+                    <p className="mt-1 text-2xl font-bold text-[#00FF9C]">
+                      {Math.round((simulationResult.recovery_probability || 0) * 100)}%
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[#8899AA]">Projected Stabilization</p>
+                    <p className="mt-1 text-2xl font-bold text-[#00E5FF]">
+                      {simulationResult.stabilization_time ? `${simulationResult.stabilization_time.toFixed(1)} months` : "Forecasted"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="text-[10px] uppercase tracking-wider text-[#8899AA]">Treatment Response Confidence</p>
+                    <p className="mt-1 text-2xl font-bold text-[#8A2BE2]">
+                      {Math.round((simulationResult.recovery_score || 0))}/100
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[#8899AA]">
+                  <Badge className="border-0 bg-[#00E5FF]/10 text-[#00E5FF]">{simulationResult.response_band || "moderate"} band</Badge>
+                  <Badge className="border-0 bg-[#00FF9C]/10 text-[#00FF9C]">{simulationResult.treatment_status || "Responding to Treatment"}</Badge>
+                  <Badge className="border-0 bg-[#FF9F43]/10 text-[#FF9F43]">Risk {simulationResult.risk_level || "moderate"}</Badge>
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {([25, 50, 75] as const).map((value) => (
                     <div key={value}>
                       <div className="mb-1 flex items-center justify-between text-xs">
                         <span className="text-[#8899AA]">{value}% improvement</span>
-                        <span className="font-semibold text-[#00E5FF]">{recoveryTimeline[`${value}%`] || "--"}</span>
+                        <span className="font-semibold text-[#00E5FF]">
+                          {stageTimeline[`${value}%`] || `~${Math.round((simulationResult.stage_probabilities?.[`${value}`] || 0) * 100)}% likely`}
+                        </span>
                       </div>
+                      <p className="mb-1 text-[10px] uppercase tracking-wider text-[#8899AA]">
+                        {simulationResult.stage_likelihoods?.[`${value}`] || "Estimated"}
+                      </p>
                       <Progress value={Math.min(100, (recoveryProgress / value) * 100)} className="h-2" />
                     </div>
                   ))}
-                            {simulationResult && activeMedicine && medicineEffect !== "none" && (
-                              <MedicineTimeline
-                                timeline={recoveryTimeline}
-                                medicineEffect={medicineEffect as "effective" | "ineffective"}
-                                activeMedicine={activeMedicine}
-                                progress={recoveryProgress}
-                              />
-                            )}
+
+                  {simulationResult && activeMedicine && medicineEffect !== "none" && (
+                    <MedicineTimeline
+                      timeline={stageTimeline}
+                      medicineEffect={medicineEffect as "effective" | "ineffective"}
+                      activeMedicine={activeMedicine}
+                      progress={recoveryProgress}
+                      treatmentStatus={simulationResult.treatment_status}
+                      riskLevel={simulationResult.risk_level}
+                    />
+                  )}
                 </div>
+
+                {responseCurveData.length > 1 && (
+                  <div className="mt-4 rounded-xl border border-white/10 bg-[#0A1628]/60 p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#8899AA]">
+                      Biological Response Curve
+                    </p>
+                    <ChartContainer config={timelineChartConfig} className="h-56 w-full">
+                      <LineChart data={responseCurveData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+                        <XAxis dataKey="month" tick={{ fill: "#8899AA", fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <YAxis domain={[0, 100]} tick={{ fill: "#8899AA", fontSize: 11 }} axisLine={false} tickLine={false} />
+                        <ChartTooltip
+                          cursor={{ stroke: "rgba(255,255,255,0.25)", strokeWidth: 1 }}
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value, name) => (
+                                <>
+                                  <span className="text-muted-foreground">{String(name)}</span>
+                                  <span className="text-foreground font-mono font-medium tabular-nums">
+                                    {Number(value).toFixed(1)}%
+                                  </span>
+                                </>
+                              )}
+                            />
+                          }
+                        />
+                        <Line type="monotone" dataKey="reductionPct" stroke="var(--color-responseReduction)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="tumorFraction" stroke="var(--color-tumorArea)" strokeWidth={2} dot={false} />
+                        <Line type="monotone" dataKey="recoveryProbability" stroke="var(--color-recovery)" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ChartContainer>
+                  </div>
+                )}
               </div>
             )}
 
@@ -810,19 +1073,21 @@ function DigitalTwinContent() {
             )}
           </div>
 
-          <div className="flex flex-col overflow-hidden border-l border-white/5 pl-2 lg:col-span-2 lg:pl-6 xl:col-span-2">
-            <MedicineAnalysisPanel
-              cancerType={cancerType}
-              recommended={recommended}
-              notRecommended={notRecommended}
-              selectedMedicine={selectedMedicine}
-              onMedicineChange={setSelectedMedicine}
-              onTestMedicine={handleSimulateDrug}
-              isTesting={simulating}
-            />
+          <div className="flex flex-col h-full overflow-hidden border-l border-white/5 pl-2 lg:col-span-2 lg:pl-6 xl:col-span-2">
+            <div className="flex-1 min-h-0">
+              <MedicineAnalysisPanel
+                cancerType={cancerType}
+                recommended={recommended}
+                notRecommended={notRecommended}
+                selectedMedicine={selectedMedicine}
+                onMedicineChange={setSelectedMedicine}
+                onTestMedicine={handleSimulateDrug}
+                isTesting={simulating}
+              />
+            </div>
 
             {simulationResult && activeMedicine && (
-              <div className="mt-4 rounded-2xl border border-white/10 glass-panel p-4">
+              <div className="mt-4 rounded-2xl border border-white/10 glass-panel p-4 flex-shrink-0">
                 <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-[#E8EDF2]">
                   <FlaskConical className="h-4 w-4 text-[#00E5FF]" /> Tumor Analysis Result
                 </h3>
@@ -838,6 +1103,7 @@ function DigitalTwinContent() {
                   <p className="text-[#8899AA]">25% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["25%"] || "--"}</span></p>
                   <p className="text-[#8899AA]">50% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["50%"] || "--"}</span></p>
                   <p className="text-[#8899AA]">75% improvement → <span className="text-[#00E5FF]">{recoveryTimeline["75%"] || "--"}</span></p>
+                  <p className="text-[#8899AA]">Treatment Score → <span className="text-[#00FF9C]">{treatmentScore}/100</span></p>
                 </div>
 
                 {simulationResult.explanation && (

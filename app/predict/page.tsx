@@ -280,7 +280,10 @@ export default function PredictionPage() {
             tumor_detected: !!data.tumor_detected,
             tumor_type: data.tumor_type || "unknown",
             top_genes: [],
-            medicines: data.medicines || { recommended: [], notRecommended: [] },
+            medicines: data.medicines ? {
+              recommended: data.medicines.recommended || data.medicines.recommended_medicines || [],
+              notRecommended: data.medicines.notRecommended || data.medicines.not_recommended || []
+            } : { recommended: [], notRecommended: [] },
             sample_count: 1,
             model_version: data.model_version || "Tumor CNN + Digital Twin",
             digital_twin: data.digital_twin,
@@ -291,7 +294,10 @@ export default function PredictionPage() {
             aggressiveness: normalizedAggressiveness,
             prediction_mode: "gene",
             top_genes: data.important_genes || data.top_genes || [],
-            medicines: data.medicines || { recommended: [], notRecommended: [] },
+            medicines: data.medicines ? {
+              recommended: data.medicines.recommended || data.medicines.recommended_medicines || [],
+              notRecommended: data.medicines.notRecommended || data.medicines.not_recommended || []
+            } : { recommended: [], notRecommended: [] },
             sample_count: data.sample_count || 1,
             model_version: data.model_version || "1.0.0",
             digital_twin: data.digital_twin,

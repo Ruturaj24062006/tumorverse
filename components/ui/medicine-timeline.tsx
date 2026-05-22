@@ -4,7 +4,7 @@ import { motion } from "framer-motion"
 import { Card } from "./card"
 
 interface RecoveryTimeline {
-  [key: string]: string
+  [key: string]: string | number | null | undefined
 }
 
 interface MedicineTimelineProps {
@@ -12,6 +12,8 @@ interface MedicineTimelineProps {
   medicineEffect: "effective" | "ineffective"
   activeMedicine: string
   progress: number
+  treatmentStatus?: string
+  riskLevel?: string
 }
 
 export function MedicineTimeline({
@@ -19,15 +21,19 @@ export function MedicineTimeline({
   medicineEffect,
   activeMedicine,
   progress,
+  treatmentStatus,
+  riskLevel,
 }: MedicineTimelineProps) {
   const timelinePoints = [
     { percent: "25%", label: "1st Phase" },
     { percent: "50%", label: "Halfway" },
     { percent: "75%", label: "Late Stage" },
+    { percent: "stabilization", label: "Stabilization" },
   ]
 
   const isEffective = medicineEffect === "effective"
   const color = isEffective ? "#00FF9C" : "#FF3B5C"
+  const statusLabel = treatmentStatus || (isEffective ? "Responding to Treatment" : "Poor Response")
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -116,7 +122,7 @@ export function MedicineTimeline({
                 className="font-mono text-sm font-semibold"
                 style={{ color }}
               >
-                {timeline[point.percent]}
+                {timeline[point.percent] ?? "Not achieved"}
               </span>
             </motion.div>
           ))}
@@ -126,9 +132,10 @@ export function MedicineTimeline({
         <div className="mt-4 rounded-lg border border-gray-700/50 bg-gray-900/30 p-3">
           <p className="text-xs text-gray-400">
             {isEffective
-              ? "✓ Medicine is showing positive response. Tumor shrinking expected."
-              : "⚠ Medicine may not be effective. Consider alternatives."}
+              ? `✓ ${statusLabel}. Tumor shrinking expected.`
+              : `⚠ ${statusLabel}. Consider alternatives.`}
           </p>
+          {riskLevel ? <p className="mt-1 text-[11px] text-gray-500">Risk level: {riskLevel}</p> : null}
         </div>
       </motion.div>
     </Card>

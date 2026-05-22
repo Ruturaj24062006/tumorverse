@@ -1,10 +1,12 @@
 "use client"
 
+import React from "react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import { RotateCcw, ZoomIn, ZoomOut, Dna, Activity } from "lucide-react"
+import UploadMesh from "./UploadMesh"
 
 interface ControlPanelProps {
     showGenes: boolean
@@ -19,6 +21,7 @@ interface ControlPanelProps {
     recoveryProgress: number
     setRecoveryProgress: (progress: number) => void
     onResetView: () => void
+    onMeshLoaded?: (mesh: { vertices: number[][]; faces: number[][] }) => void
 }
 
 export function ControlPanel({
@@ -34,6 +37,7 @@ export function ControlPanel({
     recoveryProgress,
     setRecoveryProgress,
     onResetView,
+    onMeshLoaded,
 }: ControlPanelProps) {
     return (
         <div className="glass-panel flex flex-col gap-4 rounded-2xl p-4">
@@ -119,6 +123,17 @@ export function ControlPanel({
                 >
                     <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Reset View
                 </Button>
+            </div>
+            <div className="mt-2">
+                {/* Upload real NIfTI / NPZ and extract mesh server-side */}
+                {onMeshLoaded && (
+                    // Dynamically import to keep bundle small
+                    <React.Suspense fallback={<div className="text-xs text-[#8899AA]">Loading uploader...</div>}>
+                        {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
+                        {/* @ts-ignore */}
+                        <UploadMesh onMesh={onMeshLoaded} />
+                    </React.Suspense>
+                )}
             </div>
         </div>
     )

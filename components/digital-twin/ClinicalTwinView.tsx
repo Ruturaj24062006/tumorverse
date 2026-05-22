@@ -6,6 +6,7 @@ interface ClinicalTwinViewProps {
   recoveryProgress: number
   time: number
   tumorIntensity: number
+  treatmentScore?: number
   lesionCoverage?: number
   lesionConfidence?: number
   lesionFocus?: {
@@ -26,25 +27,35 @@ export function ClinicalTwinView({
   recoveryProgress,
   time,
   tumorIntensity,
+  treatmentScore = 50,
   lesionCoverage = 0,
   lesionConfidence = 0,
   lesionFocus,
   sourceImageUrl,
   sourceImageName,
 }: ClinicalTwinViewProps) {
+  const scoreRatio = clamp(treatmentScore / 100, 0, 1)
   const focusX = lesionFocus ? clamp(22 + lesionFocus.x * 56, 18, 78) : 50
   const focusY = lesionFocus ? clamp(22 + lesionFocus.y * 56, 18, 78) : 50
-  const baseLesion = 8 + lesionCoverage * 18 + tumorIntensity * 6
-  const effectiveScale = 1 - clamp(recoveryProgress / 100, 0, 1) * 0.55
-  const ineffectiveScale = 1 + Math.min(0.75, time * 0.045)
+  const baseLesion = (7.5 + lesionCoverage * 16 + tumorIntensity * 5.2) * (0.82 + (1 - scoreRatio) * 0.35)
+  const effectiveScale = 1 - clamp(recoveryProgress / 100, 0, 1) * (0.32 + scoreRatio * 0.2)
+  const ineffectiveScale = 1 + Math.min(0.65, time * (0.03 + (1 - scoreRatio) * 0.018))
   const responseScale =
     medicineEffect === "effective" ? effectiveScale : medicineEffect === "ineffective" ? ineffectiveScale : 1
   const lesionRadius = clamp(baseLesion * responseScale, 5, 28)
 
   const trendLabel =
-    medicineEffect === "effective" ? "Tumor shrinking over time" : medicineEffect === "ineffective" ? "Tumor expanding over time" : "Awaiting medicine response"
+    treatmentScore >= 70 || medicineEffect === "effective"
+      ? "Tumor shrinking over time"
+      : treatmentScore < 40 || medicineEffect === "ineffective"
+        ? "Tumor expanding over time"
+        : "Awaiting medicine response"
   const trendColor =
-    medicineEffect === "effective" ? "#00FF9C" : medicineEffect === "ineffective" ? "#FF3B5C" : "#8899AA"
+    treatmentScore >= 70 || medicineEffect === "effective"
+      ? "#00FF9C"
+      : treatmentScore < 40 || medicineEffect === "ineffective"
+        ? "#FF3B5C"
+        : "#8899AA"
 
   const riskColor = aggressiveness === "high" ? "#FF3B5C" : aggressiveness === "moderate" ? "#FF9F43" : "#00FF9C"
 

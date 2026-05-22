@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from config.medicine_database import get_medicine_profile
+from utils.recovery_timeline_engine import recovery_timeline_engine
+from utils.treatment_intelligence_engine import treatment_intelligence_engine
 
 
 class MedicineSimulator:
@@ -31,106 +33,303 @@ class MedicineSimulator:
         return max(0.1, min(3.0, float(dosage) / 50.0))
 
     @staticmethod
+    def _normalize_aggressiveness(aggressiveness: str | float) -> float:
+        if isinstance(aggressiveness, str):
+            mapping = {"low": 0.3, "moderate": 0.6, "high": 0.9}
+            return mapping.get(aggressiveness.strip().lower(), 0.6)
+        return max(0.0, min(1.0, float(aggressiveness) / 100.0))
+
+    @staticmethod
+    def _build_treatment_score(
+        medicine: str,
+        cancer_type: str,
+        tumor_size: float,
+        aggressiveness: str | float,
+        dosage: float,
+        treatment_score: float | None = None,
+        recommendation_confidence: float | None = None,
+        segmentation_confidence: float = 75.0,
+        response_trend: float = 50.0,
+        previous_treatment_response: float = 50.0,
+        medicine_category: str | None = None,
+    ) -> dict[str, object]:
+        if treatment_score is None:
+            score_input = {
+                "medicine": medicine,
+                "cancer_type": cancer_type,
+                "tumor_size": tumor_size,
+                "aggressiveness": aggressiveness,
+                "recommendation_confidence": recommendation_confidence if recommendation_confidence is not None else 55.0,
+                "segmentation_confidence": segmentation_confidence,
+                "response_trend": response_trend,
+                "previous_treatment_response": previous_treatment_response,
+                "medicine_category": medicine_category,
+            }
+            score_details = treatment_intelligence_engine.calculate_treatment_score(score_input)
+            score = float(score_details["treatment_score"])
+        else:
+            score = max(0.0, min(100.0, float(treatment_score)))
+            score_details = treatment_intelligence_engine.calculate_treatment_score(
+                {
+                    "medicine": medicine,
+                    "cancer_type": cancer_type,
+                    "tumor_size": tumor_size,
+                    "aggressiveness": aggressiveness,
+                    "recommendation_confidence": recommendation_confidence if recommendation_confidence is not None else score,
+                    "segmentation_confidence": segmentation_confidence,
+                    "response_trend": response_trend,
+                    "previous_treatment_response": previous_treatment_response,
+                    "medicine_category": medicine_category,
+                }
+            )
+            score_details["treatment_score"] = score
+            effectiveness_details = treatment_intelligence_engine.calculate_effectiveness(
+                {
+                    **score_details,
+                    "treatment_score": score,
+                    "medicine": medicine,
+                    "cancer_type": cancer_type,
+                    "aggressiveness": aggressiveness,
+                    "tumor_size": tumor_size,
+                    "response_trend": response_trend,
+                    "previous_treatment_response": previous_treatment_response,
+                    "medicine_category": medicine_category,
+                }
+            )
+            score_details["effectiveness"] = effectiveness_details["effectiveness"]
+            score_details["effectiveness_ratio"] = round(float(effectiveness_details["effectiveness"]) / 100.0, 4)
+            score_details["response_category"] = effectiveness_details["response_category"]
+            score_details["stabilization_probability"] = effectiveness_details["stabilization_probability"]
+            score_details["tumor_behavior"] = effectiveness_details["tumor_behavior"]
+            score_details["biological_modifier"] = effectiveness_details["biological_modifier"]
+            score_details["dynamic_profile"] = treatment_intelligence_engine.tumor_dynamics_from_score(score)
+
+        return score_details
+
+    @staticmethod
     def _tumor_burden_factor(tumor_size: float) -> float:
         # Larger tumors are harder to control due to burden and heterogeneity.
         return 1.0 + 0.35 * math.log1p(max(0.0, float(tumor_size)))
 
-    def simulate_tumor(self, tumor_size: float, medicine: str, dosage: float, months: float) -> Tuple[float, float]:
+    @staticmethod
+    def _growth_rate(tumor_size: float) -> float:
+        """Baseline tumor growth rate before medicine effect is applied."""
+        size = max(0.0, float(tumor_size))
+        return max(0.02, min(0.05, 0.028 + 0.006 * math.log1p(size)))
+
+    @staticmethod
+    def _drug_effect(profile: Dict[str, float], dosage: float) -> float:
+        dosage_term = MedicineSimulator._normalize_dosage(dosage)
+        k = max(0.0001, float(profile["k"]))
+        effectiveness = max(0.01, min(1.0, float(profile["effectiveness"])))
+        dosage_sensitivity = max(0.1, float(profile["dosage_sensitivity"]))
+        return k * effectiveness * dosage_term * dosage_sensitivity
+
+    @staticmethod
+    def _classify_status(growth_rate: float, drug_effect: float) -> str:
+        delta = growth_rate - drug_effect
+        if delta < -0.003:
+            return "shrinking"
+        if delta > 0.003:
+            return "growing"
+        return "stable"
+
+    def simulate_tumor(
+        self,
+        tumor_size: float,
+        medicine: str,
+        dosage: float,
+        months: float,
+        treatment_score: float | None = None,
+        cancer_type: str = "UNKNOWN",
+        aggressiveness: str | float = "moderate",
+    ) -> Tuple[float, float]:
         """Return simulated tumor size and percentage reduction at a given month horizon."""
         initial_size = max(0.01, float(tumor_size))
         time_months = max(0.0, float(months))
-        dosage_term = self._normalize_dosage(dosage)
         profile = self._resolve_medicine_kinetics(medicine)
 
-        k = max(0.0001, float(profile["k"]))
-        effectiveness = max(0.01, min(1.0, float(profile["effectiveness"])))
-        dosage_sensitivity = max(0.1, float(profile["dosage_sensitivity"]))
-        burden_factor = self._tumor_burden_factor(initial_size)
+        score_details = self._build_treatment_score(
+            medicine=medicine,
+            cancer_type=cancer_type,
+            tumor_size=initial_size,
+            aggressiveness=aggressiveness,
+            dosage=dosage,
+            treatment_score=treatment_score,
+        )
+        score_ratio = float(score_details["effectiveness_ratio"])
+        aggressiveness_ratio = self._normalize_aggressiveness(aggressiveness)
 
-        # tumor_size(t) = initial_size * exp(-k * dosage * time)
-        effective_rate = (k * effectiveness * dosage_term * dosage_sensitivity) / burden_factor
-        new_size = initial_size * math.exp(-effective_rate * time_months)
-        reduction_pct = max(0.0, min(100.0, (1.0 - (new_size / initial_size)) * 100.0))
+        growth_rate = self._growth_rate(initial_size) / self._tumor_burden_factor(initial_size)
+        growth_rate *= 1.15 - 0.45 * score_ratio + 0.12 * aggressiveness_ratio
+        drug_effect = (0.012 + 0.11 * score_ratio) * self._normalize_dosage(dosage) * float(profile["effectiveness"])
+
+        # new_size = size * exp((growth_rate - drug_effect) * time)
+        new_size = initial_size * math.exp((growth_rate - drug_effect) * time_months)
+        reduction_pct = (1.0 - (new_size / initial_size)) * 100.0
         return new_size, reduction_pct
 
-    def recovery_time(self, tumor_size: float, medicine: str, dosage: float, target_reduction: float) -> float:
-        """Return months required to reach a target percentage reduction."""
-        target = max(0.0, min(99.0, float(target_reduction))) / 100.0
-        if target <= 0.0:
-            return 0.0
+    def recovery_time(
+        self,
+        tumor_size: float,
+        medicine: str,
+        dosage: float,
+        target_reduction: float,
+        aggressiveness: str = "moderate",
+        cancer_type: str = "UNKNOWN",
+        treatment_score: float | None = None,
+    ) -> Optional[float]:
+        """Return months required to reach a target percentage reduction.
 
-        initial_size = max(0.01, float(tumor_size))
-        dosage_term = self._normalize_dosage(dosage)
-        profile = self._resolve_medicine_kinetics(medicine)
+        Returns None when the target is not reached inside the simulation horizon.
+        """
+        prediction = recovery_timeline_engine.predict_recovery_timeline(
+            tumor_size=tumor_size,
+            aggressiveness=aggressiveness,
+            medicine=medicine,
+            effectiveness=treatment_intelligence_engine.effectiveness_from_score(treatment_score if treatment_score is not None else 50.0),
+            cancer_type=cancer_type,
+            dosage=dosage,
+            treatment_score=treatment_score,
+        )
 
-        k = max(0.0001, float(profile["k"]))
-        effectiveness = max(0.01, min(1.0, float(profile["effectiveness"])))
-        dosage_sensitivity = max(0.1, float(profile["dosage_sensitivity"]))
-        burden_factor = self._tumor_burden_factor(initial_size)
-        effective_rate = (k * effectiveness * dosage_term * dosage_sensitivity) / burden_factor
+        target = int(round(max(0.0, min(100.0, float(target_reduction)))))
+        key = f"recovery_{target if target in (25, 50, 75) else 25}"
+        if target not in (25, 50, 75):
+            target = 25 if target < 37 else 50 if target < 62 else 75
+            key = f"recovery_{target}"
 
-        if effective_rate <= 1e-9:
-            return 120.0
+        value = prediction.get(key)
+        return float(value) if value is not None else None
 
-        months = -math.log(1.0 - target) / effective_rate
-        return max(0.0, min(120.0, months))
-
-    @staticmethod
-    def _time_for_reduction(target_fraction: float, rate: float) -> float:
-        if rate <= 1e-9:
-            return 120.0
-        return max(0.0, min(120.0, -math.log(1.0 - target_fraction) / rate))
-
-    def simulate_response(self, tumor_size: float, medicine_type: str, dosage: float) -> Dict[str, object]:
+    def simulate_response(
+        self,
+        tumor_size: float,
+        medicine_type: str,
+        dosage: float,
+        treatment_score: float | None = None,
+        cancer_type: str = "UNKNOWN",
+        aggressiveness: str | float = "moderate",
+        recommendation_confidence: float | None = None,
+        segmentation_confidence: float = 75.0,
+        response_trend: float = 50.0,
+        previous_treatment_response: float = 50.0,
+        medicine_category: str | None = None,
+    ) -> Dict[str, object]:
         profile = self._resolve_medicine_kinetics(medicine_type)
+        score_details = self._build_treatment_score(
+            medicine=medicine_type,
+            cancer_type=cancer_type,
+            tumor_size=tumor_size,
+            aggressiveness=aggressiveness,
+            dosage=dosage,
+            treatment_score=treatment_score,
+            recommendation_confidence=recommendation_confidence,
+            segmentation_confidence=segmentation_confidence,
+            response_trend=response_trend,
+            previous_treatment_response=previous_treatment_response,
+            medicine_category=medicine_category,
+        )
+        score = float(score_details["treatment_score"])
+        effectiveness_ratio = float(score_details["effectiveness_ratio"])
+        visual_profile = score_details["dynamic_profile"]
+        timeline = recovery_timeline_engine.predict_recovery_timeline(
+            tumor_size=tumor_size,
+            aggressiveness=aggressiveness if isinstance(aggressiveness, str) else "moderate",
+            medicine=medicine_type,
+            effectiveness=effectiveness_ratio,
+            cancer_type=cancer_type,
+            dosage=dosage,
+            treatment_score=score,
+        )
+
         horizon_months = 6.0
         final_size, tumor_reduction = self.simulate_tumor(
             tumor_size=tumor_size,
             medicine=medicine_type,
             dosage=dosage,
             months=horizon_months,
+            treatment_score=score,
+            cancer_type=cancer_type,
+            aggressiveness=aggressiveness,
         )
 
-        long_horizon_months = 120.0
-        long_horizon_size, long_horizon_reduction = self.simulate_tumor(
-            tumor_size=tumor_size,
-            medicine=medicine_type,
-            dosage=dosage,
-            months=long_horizon_months,
-        )
-        complete_response_possible = float(long_horizon_reduction) >= 99.9
+        growth_rate = self._growth_rate(tumor_size) / self._tumor_burden_factor(tumor_size)
+        drug_effect = (0.012 + 0.11 * effectiveness_ratio) * self._normalize_dosage(dosage) * float(profile["effectiveness"])
+        status = str(timeline.get("status") or self._classify_status(growth_rate, drug_effect))
+
+        complete_response_possible = float(timeline.get("max_reduction", 0.0)) >= 0.90 and score >= 75.0
 
         recovery_months = {
-            "25%": round(self.recovery_time(tumor_size, medicine_type, dosage, 25.0), 4),
-            "50%": round(self.recovery_time(tumor_size, medicine_type, dosage, 50.0), 4),
-            "75%": round(self.recovery_time(tumor_size, medicine_type, dosage, 75.0), 4),
+            "25%": timeline.get("recovery_25"),
+            "50%": timeline.get("recovery_50"),
+            "75%": timeline.get("recovery_75"),
         }
+
+        recovery_timeline = {
+            "25%": f"{timeline['recovery_25']:.2f} months" if timeline.get("recovery_25") is not None else "Not achieved",
+            "50%": f"{timeline['recovery_50']:.2f} months" if timeline.get("recovery_50") is not None else "Not achieved",
+            "75%": f"{timeline['recovery_75']:.2f} months" if timeline.get("recovery_75") is not None else "Not achieved",
+            "stabilization": f"{timeline['stabilization_time']:.2f} months" if timeline.get("stabilization_time") is not None else "Not achieved",
+        }
+
+        treatment_status = str(timeline.get("treatment_status", treatment_intelligence_engine.status_from_score(score)))
+        risk_level = str(timeline.get("risk_level", treatment_intelligence_engine.risk_level_from_score(score)))
 
         return {
             "medicine": (medicine_type or "unknown").strip().lower(),
-            "tumor_reduction": round(tumor_reduction, 4),
+            "treatment_score": round(score, 2),
+            "effectiveness": round(effectiveness_ratio, 4),
+            "effectiveness_ratio": round(effectiveness_ratio, 4),
+            "response_category": score_details.get("response_category"),
+            "stabilization_probability": score_details.get("stabilization_probability"),
+            "biological_modifier": score_details.get("biological_modifier"),
+            "tumor_behavior": score_details.get("tumor_behavior"),
+            "tumor_reduction": round(max(0.0, tumor_reduction), 4),
+            "tumor_change_pct": round(tumor_reduction, 4),
+            "status": status,
+            "treatment_status": treatment_status,
+            "risk_level": risk_level,
+            "recovery_score": timeline.get("recovery_score"),
+            "recovery_probability": score_details["recovery_probability"],
+            "recovery_probability_score": timeline.get("recovery_probability"),
+            "response_band": timeline.get("response_band"),
             "recovery_months": recovery_months,
+            "recovery_timeline": recovery_timeline,
+            "stabilization_time": timeline.get("stabilization_time"),
+            "response_curve": timeline.get("response_curve", []),
+            "timeline_curve": timeline.get("timeline_curve", []),
+            "stage_probabilities": timeline.get("stage_probabilities", {}),
+            "stage_likelihoods": timeline.get("stage_likelihoods", {}),
+            "confidence_interval": timeline.get("confidence_interval"),
+            "relapse_probability": timeline.get("relapse_probability"),
+            "resistance_estimation": timeline.get("resistance_estimation"),
+            "response_trend": timeline.get("response_trend"),
             "projected_tumor_size": round(float(final_size), 4),
-            "max_projected_reduction": round(float(long_horizon_reduction), 4),
+            "max_projected_reduction": round(float(timeline.get("max_reduction", 0.0) * 100.0), 4),
             "complete_response_possible": complete_response_possible,
             "complete_response_note": (
-                "Near-complete response is achievable within the long-horizon simulation window."
+                "Near-complete response is achievable within the simulation window."
                 if complete_response_possible
                 else "Literal 100% reduction is not reached within the model horizon; response remains asymptotic."
             ),
+            "visual_profile": visual_profile,
             "kinetics": {
                 "k": round(float(profile["k"]), 5),
                 "effectiveness": round(float(profile["effectiveness"]), 4),
                 "dosage_sensitivity": round(float(profile["dosage_sensitivity"]), 4),
+                "growth_rate": round(float(growth_rate), 5),
+                "drug_effect": round(float(drug_effect), 5),
             },
-            "model": "rule_based_exponential_decay",
-            "equation": "tumor_size(t) = initial_size * exp(-k * effectiveness * dosage * sensitivity * time / burden)",
+            "timeline": timeline,
+            "model": "rule_based_biological_timeline",
+            "equation": "response_curve = max_reduction * (1 - exp(-(t/onset)^steepness)) - resistance",
         }
 
     def predict_reduction(self, tumor_size: float, medicine_type: str, dosage: float) -> Tuple[float, float]:
         response = self.simulate_response(tumor_size=tumor_size, medicine_type=medicine_type, dosage=dosage)
         tumor_reduction = float(response["tumor_reduction"])
-        confidence = float(response["kinetics"]["effectiveness"])
+        confidence = float(response["treatment_score"]) / 100.0
         return tumor_reduction, confidence
 
 

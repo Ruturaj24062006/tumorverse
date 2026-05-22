@@ -141,7 +141,7 @@ export function MedicineAnalysisPanel({
                 </div>
             </div>
 
-            <ScrollArea className="flex-1 pr-4">
+            <ScrollArea className="flex-1 min-h-0 pr-4">
                 <div className="space-y-6">
                     <div>
                         <h4 className="mb-3 text-sm font-semibold uppercase tracking-wider" style={{ color: "#00FF9C" }}>

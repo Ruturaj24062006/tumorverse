@@ -4,12 +4,15 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
-import { Dna, BarChart3, FlaskConical, Activity, Menu, X } from "lucide-react"
+import { Dna, BarChart3, FlaskConical, Activity, Menu, X, Brain, Users, Cpu } from "lucide-react"
 
 const navLinks = [
   { href: "/", label: "Home", icon: Dna },
   { href: "/predict", label: "Predict", icon: FlaskConical },
   { href: "/tumor-twin", label: "Tumor Twin", icon: Activity },
+  { href: "/advanced-clinical-analysis", label: "Clinical Analysis", icon: Brain },
+  { href: "/patient-hub", label: "Patients", icon: Users },
+  { href: "/cognition-hub", label: "Cognition OS", icon: Cpu },
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
 ]
 
@@ -38,9 +41,9 @@ export function Navbar() {
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
                   active
-                    ? "bg-[#00E5FF]/10 text-[#00E5FF]"
+                    ? "bg-[#00E5FF]/10 text-[#00E5FF] border border-[#00E5FF]/30 font-bold shadow-md shadow-[#00E5FF]/10 scale-105"
                     : "text-[#8899AA] hover:bg-[#00E5FF]/5 hover:text-[#00E5FF]/80"
                 )}
               >
@@ -61,7 +64,7 @@ export function Navbar() {
       </nav>
 
       {mobileOpen && (
-        <div className="glass-panel border-t border-[#00E5FF]/10 px-6 py-3 md:hidden">
+        <div className="glass-panel border-t border-[#00E5FF]/10 px-6 py-3 md:hidden animate-in fade-in slide-in-from-top-2 duration-200">
           {navLinks.map((link) => {
             const Icon = link.icon
             const active = pathname === link.href
@@ -71,9 +74,9 @@ export function Navbar() {
                 href={link.href}
                 onClick={() => setMobileOpen(false)}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                   active
-                    ? "bg-[#00E5FF]/10 text-[#00E5FF]"
+                    ? "bg-[#00E5FF]/10 text-[#00E5FF] border border-[#00E5FF]/20 font-bold shadow-sm shadow-[#00E5FF]/5"
                     : "text-[#8899AA] hover:text-[#00E5FF]/80"
                 )}
               >

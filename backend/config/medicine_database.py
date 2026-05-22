@@ -155,7 +155,17 @@ UNIFIED_MEDICINE_DATABASE: Dict[str, Dict[str, float]] = {
     },
     "temozolomide": {
         "k": 0.050,
-        "effectiveness": 0.67,
+        "effectiveness": 0.86,
+        "dosage_sensitivity": 0.96,
+    },
+    "bevacizumab": {
+        "k": 0.045,
+        "effectiveness": 0.74,
+        "dosage_sensitivity": 0.95,
+    },
+    "lomustine": {
+        "k": 0.050,
+        "effectiveness": 0.68,
         "dosage_sensitivity": 0.96,
     },
     "ipilimumab": {
@@ -179,8 +189,9 @@ CANCER_RECOMMENDED: Dict[str, list[str]] = {
     "LUAD": ["docetaxel", "pembrolizumab", "gefitinib"],         # Lung adenocarcinoma
     "BRCA": ["tamoxifen", "docetaxel", "pembrolizumab"],         # Breast cancer
     "COREAD": ["cisplatin", "docetaxel", "oxaliplatin"],         # Colorectal cancer
-    "GBM": ["cabergoline", "octreotide", "pasireotide"],         # Glioblastoma
+    "GBM": ["temozolomide", "bevacizumab", "lomustine"],         # Glioblastoma
     "KIRC": ["nivolumab", "pembrolizumab", "cabergoline"],       # Kidney cancer
+    "PITUITARY": ["cabergoline", "octreotide", "pasireotide"],   # Pituitary cancer
 }
 
 # ============================================================================
@@ -216,7 +227,23 @@ def get_medicine_profile(medicine_name: str) -> Dict[str, float]:
 
 def get_medicines_for_cancer(cancer_type: str) -> list[str]:
     """Get recommended medicines for a specific cancer type."""
-    normalized = (cancer_type or "").strip().upper()
+    text = (cancer_type or "").strip().upper()
+    if "GBM" in text or "GLIOMA" in text:
+        normalized = "GBM"
+    elif "LUAD" in text or "LUNG" in text:
+        normalized = "LUAD"
+    elif "BRCA" in text or "BREAST" in text:
+        normalized = "BRCA"
+    elif "COREAD" in text or "COLON" in text or "COLO" in text:
+        normalized = "COREAD"
+    elif "KIRC" in text or "KIDNEY" in text:
+        normalized = "KIRC"
+    elif "PITUITARY" in text:
+        normalized = "PITUITARY"
+    elif "MELANOMA" in text or "SKIN" in text:
+        normalized = "MELANOMA"
+    else:
+        normalized = text
     return CANCER_RECOMMENDED.get(normalized, ["docetaxel", "pembrolizumab", "cabergoline"])
 
 

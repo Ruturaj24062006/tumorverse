@@ -6,6 +6,17 @@ Loads pre-trained models and exposes a prediction endpoint.
 import os
 import tempfile
 from pathlib import Path
+import sys
+
+# Ensure project root is on sys.path so top-level packages (e.g., `routes`) can be
+# imported when the server is started from the `backend/` directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent
+# Prefer backend dir first so imports like `config.*` (located in backend/config)
+# resolve when uvicorn is started from `backend/`.
+for p in (str(BACKEND_DIR), str(PROJECT_ROOT)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 from typing import List, Optional
 import io
 
@@ -15,8 +26,15 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from routes.predict_image import router as image_router
-from routes.recommend import router as recommend_router
+from backend.routes.predict_image import router as image_router
+from backend.routes.recommend import router as recommend_router
+from backend.routes.twin import router as twin_router
+from backend.routes.volume_api import router as volume_router
+from backend.routes.evolution import router as evolution_router
+from backend.routes.unified_medical import router as unified_medical_router
+from backend.routes.core_ai import router as core_ai_router
+from backend.routes.ecosystem import router as ecosystem_router
+from backend.routes.cognition import router as cognition_router
 
 try:
     from utils.digital_twin_predict import digital_twin_predictor
@@ -33,6 +51,22 @@ except Exception as exc:
     MEDICINE_SIM_IMPORT_ERROR = exc
 else:
     MEDICINE_SIM_IMPORT_ERROR = None
+
+try:
+    from utils.recovery_timeline_engine import recovery_timeline_engine
+except Exception as exc:
+    recovery_timeline_engine = None
+    RECOVERY_TIMELINE_IMPORT_ERROR = exc
+else:
+    RECOVERY_TIMELINE_IMPORT_ERROR = None
+
+try:
+    from utils.treatment_intelligence_engine import treatment_intelligence_engine
+except Exception as exc:
+    treatment_intelligence_engine = None
+    TREATMENT_INTELLIGENCE_IMPORT_ERROR = exc
+else:
+    TREATMENT_INTELLIGENCE_IMPORT_ERROR = None
 
 try:
     from utils.tumor_timeline_simulator import tumor_timeline_simulator
@@ -60,6 +94,13 @@ app.add_middleware(
 
 app.include_router(image_router)
 app.include_router(recommend_router)
+app.include_router(twin_router)
+app.include_router(volume_router)
+app.include_router(evolution_router)
+app.include_router(unified_medical_router)
+app.include_router(core_ai_router)
+app.include_router(ecosystem_router)
+app.include_router(cognition_router)
 
 # Define paths to model files
 MODEL_DIR = Path(__file__).parent / "model"
@@ -223,28 +264,82 @@ def prepare_input(
     Prepare uploaded gene data for inference.
 
     Steps:
-    1. Ignore extra genes not used by the model.
-    2. Validate minimum number of matching genes.
+    1. Clean input column names (strip whitespace, make uppercase).
+    2. Try to find a column containing gene symbols if matching is low.
     3. Add missing genes and fill with training gene means.
     4. Reorder columns to exact training feature order.
+    5. Fallback positionally or by mean imputation if no matching genes found.
 
     Returns:
         DataFrame with shape (n_samples, len(gene_list)).
     """
-    input_df = _remove_duplicate_columns(df.copy())
-    input_df.columns = input_df.columns.astype(str)
+    input_df = df.copy()
+    input_df.columns = input_df.columns.astype(str).str.strip().str.upper()
+    input_df = _remove_duplicate_columns(input_df)
+    
     # Preserve exact training feature order/length expected by PCA/model.
     ordered_genes = [str(g) for g in gene_list]
-    gene_set = set(ordered_genes)
+    # Keep uppercase versions of training genes for case-insensitive matching
+    gene_set = set(g.upper() for g in ordered_genes)
 
     common_genes = [g for g in input_df.columns if g in gene_set]
     matched_gene_count = len(common_genes)
 
+    # 1. Search for a column containing gene symbols if column matching is low
     if matched_gene_count < min_matched_genes:
-        raise ValueError("Uploaded gene data is insufficient for prediction.")
+        print("   Low matching columns. Searching rows for gene symbols...")
+        for col in input_df.columns:
+            try:
+                col_values = input_df[col].astype(str).str.strip().str.upper()
+                matches = sum(1 for val in col_values if val in gene_set)
+                if matches >= min_matched_genes:
+                    print(f"   Found gene symbol column: '{col}' with {matches} matches. Re-orienting...")
+                    # Get index of this column in the original DataFrame
+                    idx_col = df.columns[list(input_df.columns).index(col)]
+                    # Set as index and transpose
+                    transposed_df = df.set_index(idx_col).T
+                    transposed_df.columns = transposed_df.columns.astype(str).str.strip().str.upper()
+                    # Keep only duplicate-free versions
+                    transposed_df = _remove_duplicate_columns(transposed_df)
+                    input_df = transposed_df
+                    common_genes = [g for g in input_df.columns if g in gene_set]
+                    matched_gene_count = len(common_genes)
+                    break
+            except Exception as e:
+                print(f"   Failed checking column '{col}': {e}")
+                continue
 
+    # 2. Check matched count and handle fallback gracefully
     means_series = _build_gene_means_series(ordered_genes, training_gene_means)
+    
+    if matched_gene_count < min_matched_genes:
+        print(f"⚠ Match count ({matched_gene_count}) is less than minimum ({min_matched_genes}). Applying fallback...")
+        
+        # Check for numeric column fallback
+        numeric_df = df.select_dtypes(include=[np.number])
+        if numeric_df.shape[1] >= 5:
+            print(f"   Positional fallback: Mapping {numeric_df.shape[1]} numeric columns positionally")
+            aligned_df = pd.DataFrame(index=df.index)
+            for i, gene in enumerate(ordered_genes):
+                if i < numeric_df.shape[1]:
+                    aligned_df[gene] = numeric_df.iloc[:, i].astype(np.float32)
+                else:
+                    aligned_df[gene] = float(means_series.get(gene, 0.0))
+            print(f"   Successfully aligned {numeric_df.shape[1]} features positionally")
+            return aligned_df.astype(np.float32)
+        else:
+            print("   Imputation fallback: Filling all features with training gene means")
+            means_row = np.tile(means_series.values, (df.shape[0], 1))
+            aligned_df = pd.DataFrame(means_row, index=df.index, columns=ordered_genes)
+            return aligned_df.astype(np.float32)
+
     means_row = np.tile(means_series.values, (input_df.shape[0], 1))
+    
+    # We must match standard genes in original case order, but check against input's uppercase columns
+    # Create a mapping of uppercase columns to their actual cleaned column name in input_df
+    col_map = {col: col for col in input_df.columns}
+    
+    # Initialize aligned dataframe
     aligned_df = pd.DataFrame(means_row, index=input_df.index, columns=ordered_genes)
 
     # Scalar lookup for per-gene fill values (handles duplicated training labels safely).
@@ -254,10 +349,15 @@ def prepare_input(
         global_fill = 0.0
 
     # Overwrite means with provided values for matched genes.
+    # Note: we use the uppercase-matched gene keys to select from observed_df
     observed_df = input_df[common_genes].apply(pd.to_numeric, errors="coerce")
-    for gene in common_genes:
-        gene_fill_value = float(means_lookup.get(gene, global_fill))
-        aligned_df[gene] = observed_df[gene].fillna(gene_fill_value).astype(np.float32)
+    
+    for gene in ordered_genes:
+        gene_upper = gene.upper()
+        if gene_upper in col_map:
+            actual_col = col_map[gene_upper]
+            gene_fill_value = float(means_lookup.get(gene, global_fill))
+            aligned_df[gene] = observed_df[actual_col].fillna(gene_fill_value).astype(np.float32)
 
     filled_gene_count = len(ordered_genes) - matched_gene_count
     print("Gene alignment debug:")
@@ -333,13 +433,92 @@ class TumorTimelineResponse(BaseModel):
     """Response payload for animated tumor progression."""
 
     effectiveness: float
+    status: str
     frames: List[str]
     message: str
     risk_levels: List[str]
     recovery_percentages: List[float]
     progression_percentages: List[float]
     tumor_area_percentages: List[float]
+    mesh: dict
+    initial_area_pct: float
+    final_area_pct: float
+    growth_rate: float
+    drug_effect: float
     frame_interval_ms: int
+
+
+class RecoveryTimelineRequest(BaseModel):
+    """Schema for stage-based recovery timeline predictions."""
+
+    tumor_size: float = Field(..., gt=0)
+    aggressiveness: str = Field(default="moderate")
+    medicine: str = Field(..., min_length=1)
+    effectiveness: float = Field(..., ge=0.0, le=1.0)
+    cancer_type: str = Field(default="UNKNOWN")
+    response_trend: float = Field(default=0.0, ge=0.0, le=1.0)
+    dosage: float = Field(default=50.0, ge=0.0)
+    treatment_score: float | None = Field(default=None, ge=0.0, le=100.0)
+
+
+class RecoveryTimelineResponse(BaseModel):
+    """Response payload for AI-based recovery timeline predictions."""
+
+    recovery_score: float
+    recovery_probability: float
+    recovery_probability_label: str
+    recovery_confidence: int
+    recovery_25: float | None
+    recovery_50: float | None
+    recovery_75: float | None
+    stabilization_time: float | None
+    treatment_status: str
+    response_curve: list[dict]
+    timeline_curve: list[dict]
+    risk_level: str
+    stage_probabilities: dict
+    stage_likelihoods: dict
+    response_band: str
+    confidence_interval: dict
+    relapse_probability: float
+    resistance_estimation: float
+    max_reduction: float
+    final_reduction: float
+    final_tumor_fraction: float
+    status_summary: dict
+    curve_parameters: dict
+    months_to_stability: float | None
+    treatment_score: float | None = None
+    effectiveness: float | None = None
+
+
+class TreatmentScoreRequest(BaseModel):
+    """Schema for the centralized treatment intelligence score."""
+
+    medicine: str = Field(..., min_length=1)
+    cancer_type: str = Field(default="UNKNOWN")
+    tumor_size: float = Field(default=0.0, ge=0.0)
+    aggressiveness: float | str = Field(default=55.0)
+    recommendation_confidence: float = Field(default=50.0, ge=0.0, le=100.0)
+    segmentation_confidence: float = Field(default=75.0, ge=0.0, le=100.0)
+    response_trend: float = Field(default=50.0, ge=0.0, le=100.0)
+    medicine_category: str | None = None
+    previous_treatment_response: float = Field(default=50.0, ge=0.0, le=100.0)
+
+
+class TreatmentScoreResponse(BaseModel):
+    treatment_score: float
+    effectiveness: float
+    effectiveness_ratio: float
+    compatibility_score: float
+    medicine_potency: float
+    status: str
+    recovery_probability: str
+    risk_level: str
+    response_band: str
+    tumor_size_penalty: float
+    aggressiveness_penalty: float
+    resistance_penalty: float
 
 
 @app.get("/health")
@@ -418,39 +597,50 @@ async def predict(
                 print(f"   Loaded dataframe with shape: {df.shape}")
                 print(f"   Columns (first 5): {list(df.columns[:5])}")
                 
-                # Check if first column might be sample IDs/index
-                if df.iloc[:, 0].dtype == object or 'sample' in str(df.columns[0]).lower() or 'id' in str(df.columns[0]).lower():
-                    print(f"   Detected potential index column: '{df.columns[0]}' - setting as index")
-                    df = df.set_index(df.columns[0])
+                # 1. Detect and standardize layout orientation
+                gene_set = set(g.upper() for g in gene_list) if gene_list is not None else set()
                 
-                # Handle different CSV formats
-                if df.shape[1] >= 10:  # Likely genes as columns
-                    print(f"   Format: Genes as columns ({df.shape[1]} genes)")
-                    if gene_list is None or gene_means is None:
-                        raise ValueError(
-                            "Training gene metadata missing. Please provide gene_list.pkl and gene_means.pkl in backend/model/ (or backend/)."
-                        )
-                    aligned_df = prepare_input(df, gene_list, gene_means, min_matched_genes=20)
-                    aligned_features = aligned_df.values
-                    # Take first sample if multiple rows
-                    gene_expression = aligned_features[0].astype(np.float32)
-                    
-                elif df.shape[0] >= 10:  # Likely genes as rows
-                    print(f"   Format: Genes as rows ({df.shape[0]} genes) - transposing")
-                    df = df.T
-                    if gene_list is None or gene_means is None:
-                        raise ValueError(
-                            "Training gene metadata missing. Please provide gene_list.pkl and gene_means.pkl in backend/model/ (or backend/)."
-                        )
-                    aligned_df = prepare_input(df, gene_list, gene_means, min_matched_genes=20)
-                    aligned_features = aligned_df.values
-                    gene_expression = aligned_features[0].astype(np.float32)
-                    
+                # Check column match rate
+                cleaned_cols = [str(c).strip().upper() for c in df.columns]
+                col_matches = sum(1 for c in cleaned_cols if c in gene_set)
+                
+                # Check first column match rate
+                first_col_matches = 0
+                if df.shape[0] > 0 and df.shape[1] > 0:
+                    first_col_vals = [str(v).strip().upper() for v in df.iloc[:, 0]]
+                    first_col_matches = sum(1 for v in first_col_vals if v in gene_set)
+                
+                print(f"   Format detection - Columns matching: {col_matches}, First column matching: {first_col_matches}")
+                
+                # Re-orient based on highest match count
+                if first_col_matches > col_matches and first_col_matches >= 2:
+                    print("   Orienting: Genes as rows (first column contains gene names) - transposing")
+                    df = df.set_index(df.columns[0]).T
+                elif col_matches >= 2:
+                    print("   Orienting: Genes as columns")
+                    first_col_name = str(df.columns[0]).upper()
+                    if 'SAMPLE' in first_col_name or 'ID' in first_col_name or 'PATIENT' in first_col_name:
+                        print(f"   Setting first column '{df.columns[0]}' as index")
+                        df = df.set_index(df.columns[0])
                 else:
+                    print("   Orienting: Defaulting to Genes as columns")
+                    if df.shape[1] > 0:
+                        first_col_name = str(df.columns[0]).upper()
+                        if 'SAMPLE' in first_col_name or 'ID' in first_col_name or 'PATIENT' in first_col_name:
+                            print(f"   Setting first column '{df.columns[0]}' as index")
+                            df = df.set_index(df.columns[0])
+                
+                if gene_list is None or gene_means is None:
                     raise ValueError(
-                        f"Unexpected data format. Shape: {df.shape}. "
-                        "Expected CSV with genes as columns or rows."
+                        "Training gene metadata missing. Please provide gene_list.pkl and gene_means.pkl in backend/model/ (or backend/)."
                     )
+                
+                # Prepare and align input features
+                aligned_df = prepare_input(df, gene_list, gene_means, min_matched_genes=20)
+                aligned_features = aligned_df.values
+                
+                # Take first sample if multiple rows are present
+                gene_expression = aligned_features[0].astype(np.float32)
                     
             except Exception as e:
                 raise HTTPException(
@@ -570,6 +760,8 @@ async def predict(
             "prediction_probabilities": prediction_proba.tolist(),
         }
     
+    except HTTPException as e:
+        raise e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -638,8 +830,7 @@ async def batch_predict(data: dict):
         raise HTTPException(status_code=500, detail=f"Batch prediction failed: {str(e)}")
 
 
-@app.post("/simulate-timeline", response_model=TumorTimelineResponse)
-async def simulate_timeline(payload: TumorTimelineRequest):
+def _run_tumor_timeline_simulation(payload: TumorTimelineRequest):
     """
     Generate time-based tumor progression frames from a binary tumor mask.
 
@@ -728,30 +919,78 @@ async def analyze_tumor_response(
 
         digital_twin_result = digital_twin_predictor.predict_image(temp_path)
         tumor_size = float(digital_twin_result.get("mask_coverage_pct", 0.0))
+        treatment_score = None
+        if treatment_intelligence_engine is not None:
+            treatment_score = float(
+                treatment_intelligence_engine.calculate_treatment_score(
+                    {
+                        "medicine": medicine_type,
+                        "cancer_type": "UNKNOWN",
+                        "tumor_size": tumor_size,
+                        "aggressiveness": digital_twin_result.get("aggressiveness", "moderate"),
+                        "recommendation_confidence": 55.0,
+                        "segmentation_confidence": float(digital_twin_result.get("segmentation_confidence", 75.0)),
+                        "response_trend": 50.0,
+                        "previous_treatment_response": 50.0,
+                    }
+                )["treatment_score"]
+            )
 
         _, tumor_reduction = medicine_simulator.simulate_tumor(
             tumor_size=tumor_size,
             medicine=medicine_type,
             dosage=dosage,
             months=6.0,
+            treatment_score=treatment_score,
+            cancer_type="UNKNOWN",
+            aggressiveness=digital_twin_result.get("aggressiveness", "moderate"),
         )
-        recovery_months = {
-            "25%": round(medicine_simulator.recovery_time(tumor_size, medicine_type, dosage, 25.0), 4),
-            "50%": round(medicine_simulator.recovery_time(tumor_size, medicine_type, dosage, 50.0), 4),
-            "75%": round(medicine_simulator.recovery_time(tumor_size, medicine_type, dosage, 75.0), 4),
-        }
         simulation = medicine_simulator.simulate_response(
             tumor_size=tumor_size,
             medicine_type=medicine_type,
             dosage=dosage,
+            treatment_score=treatment_score,
+            cancer_type="UNKNOWN",
+            aggressiveness=digital_twin_result.get("aggressiveness", "moderate"),
+            recommendation_confidence=55.0,
+            segmentation_confidence=float(digital_twin_result.get("segmentation_confidence", 75.0)),
+            response_trend=50.0,
+            previous_treatment_response=50.0,
         )
+        timeline_prediction = simulation.get("timeline", {}) if isinstance(simulation.get("timeline", {}), dict) else {}
+        recovery_months = {
+            "25%": timeline_prediction.get("recovery_25"),
+            "50%": timeline_prediction.get("recovery_50"),
+            "75%": timeline_prediction.get("recovery_75"),
+        }
         kinetics = simulation.get("kinetics", {})
+        recovery_timeline = {
+            "25%": f"{timeline_prediction['recovery_25']:.2f} months" if timeline_prediction.get("recovery_25") is not None else "Not achieved",
+            "50%": f"{timeline_prediction['recovery_50']:.2f} months" if timeline_prediction.get("recovery_50") is not None else "Not achieved",
+            "75%": f"{timeline_prediction['recovery_75']:.2f} months" if timeline_prediction.get("recovery_75") is not None else "Not achieved",
+            "stabilization": f"{timeline_prediction['stabilization_time']:.2f} months" if timeline_prediction.get("stabilization_time") is not None else "Not achieved",
+        }
 
         return {
             "medicine": (medicine_type or "unknown").strip().lower(),
             "tumor_size": round(tumor_size, 4),
+            "treatment_score": round(float(treatment_score), 2) if treatment_score is not None else None,
             "predicted_reduction": round(float(tumor_reduction), 4),
+            "recovery_score": simulation.get("recovery_score"),
+            "recovery_probability": simulation.get("recovery_probability"),
             "recovery_months": recovery_months,
+            "recovery_timeline": recovery_timeline,
+            "stabilization_time": timeline_prediction.get("stabilization_time"),
+            "treatment_status": simulation.get("treatment_status"),
+            "risk_level": simulation.get("risk_level"),
+            "response_curve": simulation.get("response_curve", []),
+            "timeline_curve": simulation.get("timeline_curve", []),
+            "stage_probabilities": simulation.get("stage_probabilities", {}),
+            "stage_likelihoods": simulation.get("stage_likelihoods", {}),
+            "response_band": simulation.get("response_band"),
+            "confidence_interval": simulation.get("confidence_interval"),
+            "relapse_probability": simulation.get("relapse_probability"),
+            "resistance_estimation": simulation.get("resistance_estimation"),
             # Backward-compatible aliases for existing frontend consumers.
             "tumor_reduction": round(float(tumor_reduction), 4),
             "confidence": round(float(kinetics.get("effectiveness", 0.0)), 4),
@@ -777,6 +1016,95 @@ async def analyze_tumor_response(
         await file.close()
         if temp_path and temp_path.exists():
             os.remove(temp_path)
+
+
+@app.post("/predict_recovery_timeline", response_model=RecoveryTimelineResponse)
+async def predict_recovery_timeline(payload: RecoveryTimelineRequest):
+    """Predict a stage-based recovery timeline for a tumor-treatment pairing."""
+    if recovery_timeline_engine is None:
+        missing_dependency = getattr(RECOVERY_TIMELINE_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Recovery timeline engine is unavailable. Missing module: {missing_dependency}.",
+        )
+
+    return recovery_timeline_engine.predict_recovery_timeline(
+        tumor_size=payload.tumor_size,
+        aggressiveness=payload.aggressiveness,
+        medicine=payload.medicine,
+        effectiveness=payload.effectiveness,
+        cancer_type=payload.cancer_type,
+        response_trend=payload.response_trend,
+        dosage=payload.dosage,
+        treatment_score=payload.treatment_score,
+    )
+
+
+@app.post("/calculate_treatment_score", response_model=TreatmentScoreResponse)
+async def calculate_treatment_score(payload: TreatmentScoreRequest):
+    """Calculate the centralized treatment intelligence score."""
+    if treatment_intelligence_engine is None:
+        missing_dependency = getattr(TREATMENT_INTELLIGENCE_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Treatment intelligence engine is unavailable. Missing module: {missing_dependency}.",
+        )
+
+    return treatment_intelligence_engine.calculate_treatment_score(payload.model_dump())
+
+
+@app.post("/simulate", response_model=TumorTimelineResponse)
+async def simulate_tumor(payload: TumorTimelineRequest):
+    """Simulate tumor progression over time and return masks plus a pseudo-3D mesh."""
+    if tumor_timeline_simulator is None:
+        missing_dependency = getattr(TUMOR_TIMELINE_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Tumor timeline simulator is unavailable. "
+                f"Missing module: {missing_dependency}."
+            ),
+        )
+
+    try:
+        return _run_tumor_timeline_simulation(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Simulation failed: {exc}") from exc
+
+
+@app.post("/simulate_treatment", response_model=TumorTimelineResponse)
+async def simulate_treatment(payload: TumorTimelineRequest):
+    """Alias for the tumor simulation endpoint requested by the frontend/demo contract."""
+    return await simulate_tumor(payload)
+
+
+@app.post("/simulate-timeline", response_model=TumorTimelineResponse)
+async def simulate_timeline(payload: TumorTimelineRequest):
+    """Backward-compatible alias for the timeline simulation endpoint."""
+    if tumor_timeline_simulator is None:
+        missing_dependency = getattr(TUMOR_TIMELINE_IMPORT_ERROR, "name", "unknown")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Tumor timeline simulator is unavailable. "
+                f"Missing module: {missing_dependency}."
+            ),
+        )
+
+    try:
+        return _run_tumor_timeline_simulation(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Timeline simulation failed: {exc}") from exc
+
+
+@app.post("/predict_tumor")
+async def predict_tumor(payload: TumorTimelineRequest):
+    """Alias endpoint that returns the same tumor prediction/simulation payload."""
+    return await simulate_tumor(payload)
 
 
 if __name__ == "__main__":
